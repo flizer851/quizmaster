@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kahoot! Style Quiz Master</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome CDN for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Montserrat', 'sans-serif'],
+                    },
+                    colors: {
+                        kahoot: {
+                            purple: '#46178f',
+                            darkPurple: '#25076b',
+                            lightPurple: '#864cbf',
+                            red: '#e21b3c',
+                            blue: '#1368ce',
+                            yellow: '#ffa602',
+                            green: '#26890c',
+                            grayBg: '#f2f2f2'
+                        }
+                    },
+                    keyframes: {
+                        bounceShort: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' }
+                        },
+                        pulseFast: {
+                            '0%, 100%': { opacity: '1' },
+                            '50%': { opacity: '0.6' }
+                        }
+                    },
+                    animation: {
+                        bounceShort: 'bounceShort 0.5s ease-in-out',
+                        pulseFast: 'pulseFast 0.8s infinite'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background: linear-gradient(135deg, #46178f 0%, #25076b 100%);
+            min-height: 100vh;
+            user-select: none;
+        }
+
+        /* Custom buttons style for Kahoot options */
+        .btn-kahoot {
+            transition: transform 0.1s ease, filter 0.2s ease, box-shadow 0.1s ease;
+            box-shadow: 0 6px 0 rgba(0,0,0,0.25);
+        }
+        .btn-kahoot:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 rgba(0,0,0,0.25);
+        }
+        .btn-kahoot:hover {
+            filter: brightness(1.08);
+        }
+
+        .btn-red { background-color: #e21b3c; }
+        .btn-blue { background-color: #1368ce; }
+        .btn-yellow { background-color: #d89e00; }
+        .btn-green { background-color: #26890c; }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Floating shapes animation background */
+        .shape-bg {
+            position: absolute;
+            opacity: 0.08;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Glassmorphism card */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 1.25rem;
+            box-shadow: 0 20px 30px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body class="text-slate-800 flex flex-col justify-between min-h-screen relative overflow-x-hidden">
+
+    <!-- Background Decorative Floating Shapes -->
+    <i class="fa-solid fa-triangle shape-bg text-red-500 text-9xl top-10 left-10 transform -rotate-12"></i>
+    <i class="fa-solid fa-diamond shape-bg text-blue-500 text-9xl top-1/3 right-12 transform rotate-45"></i>
+    <i class="fa-solid fa-circle shape-bg text-yellow-500 text-9xl bottom-20 left-1/4"></i>
+    <i class="fa-solid fa-square shape-bg text-green-500 text-9xl bottom-10 right-1/3 transform rotate-12"></i>
+
+    <!-- Top Navigation Bar -->
+    <header class="relative z-10 w-full px-6 py-4 flex justify-between items-center bg-black/20 backdrop-blur-md border-b border-white/10">
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="app.showScreen('welcomeScreen')">
+            <div class="bg-white text-kahoot-purple font-black text-2xl px-3 py-1 rounded-lg tracking-wider shadow-lg transform -rotate-2">
+                K!
+            </div>
+            <span class="text-white font-extrabold text-xl tracking-tight hidden sm:inline">QuizMaster</span>
+        </div>
+        
+        <div class="flex items-center space-x-3">
+            <button id="soundToggleBtn" onclick="app.toggleSound()" class="bg-white/10 hover:bg-white/20 text-white p-2.5 rounded-full transition text-sm font-semibold flex items-center justify-center w-10 h-10 border border-white/20">
+                <i class="fa-solid fa-volume-high" id="soundIcon"></i>
+            </button>
+            <button onclick="app.showScreen('creatorScreen')" class="bg-yellow-400 hover:bg-yellow-300 text-slate-900 font-bold px-4 py-2 rounded-xl text-sm transition shadow-md flex items-center gap-2">
+                <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">Создать Квиз</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="relative z-10 flex-grow flex items-center justify-center p-4">
+
+        <!-- ================= 1. WELCOME SCREEN ================= -->
+        <section id="welcomeScreen" class="w-full max-w-md glass-card p-6 sm:p-8 text-center my-auto transition-all duration-300">
+            <div class="mb-6">
+                <h1 class="text-4xl font-black text-kahoot-purple tracking-tight mb-2">Kahoot! Clone</h1>
+                <p class="text-slate-500 font-semibold text-sm">Прокачай свои знания или создай свой квиз!</p>
+            </div>
+
+            <!-- PIN or Quiz Selection Tabs -->
+            <div class="space-y-4">
+                <div class="bg-slate-100 p-1.5 rounded-xl flex font-bold text-xs">
+                    <button id="tabPresets" onclick="app.switchWelcomeTab('presets')" class="flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition">Готовые Квизы</button>
+                    <button id="tabPin" onclick="app.switchWelcomeTab('pin')" class="flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition">Ввести PIN / Код</button>
+                </div>
+
+                <!-- Tab 1: Presets -->
+                <div id="viewPresets" class="space-y-3">
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Выберите тему:</label>
+                    <div id="quizPresetList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        <!-- Dynamic Presets Loaded Here -->
+                    </div>
+                </div>
+
+                <!-- Tab 2: Custom PIN -->
+                <div id="viewPin" class="space-y-3 hidden">
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Введите PIN викторины:</label>
+                    <input type="text" id="pinInput" placeholder="Например: 123456" maxlength="6" class="w-full text-center text-2xl font-black py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none uppercase tracking-widest text-slate-700">
+                    <button onclick="app.loadQuizByPin()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition shadow-md">Найти Квиз</button>
+                </div>
+
+                <hr class="border-slate-200 my-4">
+
+                <!-- Player Profile Setup -->
+                <div class="space-y-3">
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Профиль игрока:</label>
+                    <div class="flex items-center space-x-3">
+                        <button onclick="app.nextAvatar()" id="avatarBtn" class="text-3xl bg-slate-100 p-2 rounded-xl hover:bg-slate-200 transition border border-slate-200 flex-shrink-0 title='Сменить аватар'">
+                            😎
+                        </button>
+                        <input type="text" id="playerNameInput" placeholder="Ваше Имя / Никнейм" maxlength="15" class="w-full font-bold px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none text-slate-800">
+                    </div>
+                </div>
+
+                <button onclick="app.startLobby()" class="w-full bg-kahoot-green hover:bg-green-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 transition mt-2">
+                    ИГРАТЬ!
+                </button>
+            </div>
+        </section>
+
+        <!-- ================= 2. LOBBY / WAITING SCREEN ================= -->
+        <section id="lobbyScreen" class="w-full max-w-lg glass-card p-8 text-center hidden flex-col items-center">
+            <div class="inline-block bg-kahoot-purple text-white px-4 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-widest mb-4">
+                Готов к старту
+            </div>
+            <h2 id="lobbyQuizTitle" class="text-2xl font-black text-slate-800 mb-2">Название Квиза</h2>
+            <p id="lobbyQuizDesc" class="text-slate-500 text-sm mb-6">Количество вопросов: <span id="lobbyQuestionCount">0</span></p>
+
+            <div class="w-full bg-slate-50 border border-slate-200 p-6 rounded-2xl mb-8 flex flex-col items-center">
+                <div id="lobbyAvatar" class="text-6xl mb-3 animate-bounceShort">😎</div>
+                <div id="lobbyPlayerName" class="text-xl font-black text-slate-800">Имя Игрока</div>
+                <div class="text-xs font-bold text-slate-400 mt-1">Игрок №1 (Соло Режим)</div>
+            </div>
+
+            <button onclick="app.startQuizGame()" class="w-full bg-kahoot-blue hover:bg-blue-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transition">
+                НАЧАТЬ ИГРУ <i class="fa-solid fa-play ml-2"></i>
+            </button>
+        </section>
+
+        <!-- ================= 3. GAME QUESTION SCREEN ================= -->
+        <section id="gameScreen" class="w-full max-w-4xl hidden flex-col space-y-4 my-auto">
+            
+            <!-- Top Game Bar: Progress, Timer, Score -->
+            <div class="flex justify-between items-center bg-white/95 backdrop-blur-md px-6 py-3 rounded-2xl shadow-lg">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xs font-black bg-slate-200 text-slate-700 px-3 py-1 rounded-full uppercase" id="gameProgress">
+                        1 / 5
+                    </span>
+                    <span class="text-xs font-bold text-slate-500 hidden sm:inline" id="gameCategory">
+                        Категория
+                    </span>
+                </div>
+
+                <!-- Circular Visual Timer -->
+                <div class="relative flex items-center justify-center">
+                    <div id="timerDisplay" class="w-12 h-12 rounded-full bg-kahoot-purple text-white font-black text-lg flex items-center justify-center shadow-md">
+                        15
+                    </div>
+                </div>
+
+                <div class="text-right">
+                    <div class="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Очки</div>
+                    <div class="text-xl font-black text-kahoot-purple" id="gameScore">0</div>
+                </div>
+            </div>
+
+            <!-- Question Box -->
+            <div class="glass-card p-6 sm:p-8 text-center min-h-[180px] flex flex-col justify-center items-center relative">
+                <h2 id="questionText" class="text-xl sm:text-2xl md:text-3xl font-extrabold text-slate-800 leading-snug">
+                    Текст вопроса здесь?
+                </h2>
+                <!-- Optional Emoji/Icon media -->
+                <div id="questionMedia" class="text-5xl mt-4">💡</div>
+            </div>
+
+            <!-- Answer Buttons Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <button onclick="app.submitAnswer(0)" class="btn-kahoot btn-red text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
+                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
+                        <i class="fa-solid fa-triangle text-white"></i>
+                    </span>
+                    <span id="answer0Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 1</span>
+                </button>
+
+                <button onclick="app.submitAnswer(1)" class="btn-kahoot btn-blue text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
+                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
+                        <i class="fa-solid fa-diamond text-white"></i>
+                    </span>
+                    <span id="answer1Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 2</span>
+                </button>
+
+                <button onclick="app.submitAnswer(2)" class="btn-kahoot btn-yellow text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
+                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
+                        <i class="fa-solid fa-circle text-white"></i>
+                    </span>
+                    <span id="answer2Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 3</span>
+                </button>
+
+                <button onclick="app.submitAnswer(3)" class="btn-kahoot btn-green text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
+                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
+                        <i class="fa-solid fa-square text-white"></i>
+                    </span>
+                    <span id="answer3Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 4</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- ================= 4. QUESTION RESULT SCREEN ================= -->
+        <section id="resultFeedbackScreen" class="w-full max-w-md glass-card p-8 text-center hidden flex-col items-center my-auto">
+            <div id="feedbackIconContainer" class="w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg">
+                <i id="feedbackIcon" class="fa-solid fa-check"></i>
+            </div>
+            
+            <h2 id="feedbackTitle" class="text-3xl font-black mb-1">Правильно!</h2>
+            <p id="feedbackSubtitle" class="text-slate-500 font-bold text-sm mb-4">+950 очков за скорость</p>
+
+            <!-- Streak Counter -->
+            <div id="streakBox" class="bg-orange-100 border border-orange-200 text-orange-700 font-black px-4 py-2 rounded-xl text-sm mb-6 flex items-center gap-2">
+                <i class="fa-solid fa-fire text-orange-500"></i>
+                <span>Серия ответов (Streak): <span id="streakCount">0</span></span>
+            </div>
+
+            <button onclick="app.nextQuestion()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-lg py-3 rounded-xl transition shadow-md">
+                Далее <i class="fa-solid fa-arrow-right ml-1"></i>
+            </button>
+        </section>
+
+        <!-- ================= 5. FINAL LEADERBOARD / PODIUM ================= -->
+        <section id="podiumScreen" class="w-full max-w-2xl glass-card p-6 sm:p-10 text-center hidden flex-col items-center my-auto">
+            <h2 class="text-3xl sm:text-4xl font-black text-kahoot-purple mb-1">Викторина Завершена!</h2>
+            <p class="text-slate-500 font-bold text-sm mb-6">Результаты вашей игры</p>
+
+            <!-- Podium Visual (Solo + Bots for competition feel) -->
+            <div class="w-full flex justify-center items-end gap-2 sm:gap-4 mb-8 h-48 border-b-4 border-slate-200 pb-2">
+                <!-- 2nd Place -->
+                <div class="flex-1 flex flex-col items-center">
+                    <div id="podium2Avatar" class="text-2xl sm:text-3xl mb-1">🤖</div>
+                    <div id="podium2Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">Бот Аген</div>
+                    <div id="podium2Score" class="text-xs font-black text-slate-400 mb-1">0</div>
+                    <div class="w-full bg-slate-300 h-24 rounded-t-lg flex items-center justify-center font-black text-slate-600 text-xl">2</div>
+                </div>
+
+                <!-- 1st Place (Winner) -->
+                <div class="flex-1 flex flex-col items-center">
+                    <div class="text-yellow-500 text-xl animate-bounceShort"><i class="fa-solid fa-crown"></i></div>
+                    <div id="podium1Avatar" class="text-3xl sm:text-4xl mb-1">😎</div>
+                    <div id="podium1Name" class="text-sm font-black text-slate-800 truncate max-w-[100px]">Игрок</div>
+                    <div id="podium1Score" class="text-xs font-black text-kahoot-purple mb-1">0</div>
+                    <div class="w-full bg-yellow-400 h-36 rounded-t-lg flex items-center justify-center font-black text-yellow-900 text-2xl shadow-md">1</div>
+                </div>
+
+                <!-- 3rd Place -->
+                <div class="flex-1 flex flex-col items-center">
+                    <div id="podium3Avatar" class="text-2xl sm:text-3xl mb-1">👾</div>
+                    <div id="podium3Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">Бот Нео</div>
+                    <div id="podium3Score" class="text-xs font-black text-slate-400 mb-1">0</div>
+                    <div class="w-full bg-amber-700/30 h-16 rounded-t-lg flex items-center justify-center font-black text-amber-900 text-lg">3</div>
+                </div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="grid grid-cols-3 gap-3 w-full mb-6">
+                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                    <div class="text-xs text-slate-400 font-bold uppercase">Точность</div>
+                    <div id="statAccuracy" class="text-lg sm:text-xl font-black text-slate-700">0%</div>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                    <div class="text-xs text-slate-400 font-bold uppercase">Правильно</div>
+                    <div id="statCorrect" class="text-lg sm:text-xl font-black text-green-600">0/0</div>
+                </div>
+                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                    <div class="text-xs text-slate-400 font-bold uppercase">Макс. Стрик</div>
+                    <div id="statMaxStreak" class="text-lg sm:text-xl font-black text-orange-500">0 🔥</div>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3 w-full">
+                <button onclick="app.restartQuiz()" class="flex-1 bg-kahoot-purple hover:bg-kahoot-darkPurple text-white font-bold py-3 rounded-xl transition">
+                    <i class="fa-solid fa-rotate-right mr-1"></i> Играть снова
+                </button>
+                <button onclick="app.showScreen('welcomeScreen')" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-xl transition">
+                    Главное меню
+                </button>
+            </div>
+        </section>
+
+        <!-- ================= 6. QUIZ CREATOR SCREEN ================= -->
+        <section id="creatorScreen" class="w-full max-w-2xl glass-card p-6 sm:p-8 hidden flex-col my-auto max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6 border-b border-slate-200 pb-4">
+                <div>
+                    <h2 class="text-2xl font-black text-slate-800">Конструктор Викторин</h2>
+                    <p class="text-xs text-slate-500 font-bold">Создайте свой уникальный Kahoot квиз!</p>
+                </div>
+                <button onclick="app.showScreen('welcomeScreen')" class="text-slate-400 hover:text-slate-600 p-2">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Quiz Meta Form -->
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Название викторины:</label>
+                    <input type="text" id="customQuizTitle" placeholder="Например: Моя супер викторина" class="w-full px-4 py-2 border-2 border-slate-200 rounded-xl font-bold focus:border-kahoot-purple focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Категория / Описание:</label>
+                    <input type="text" id="customQuizDesc" placeholder="Развлекательный квиз для друзей" class="w-full px-4 py-2 border-2 border-slate-200 rounded-xl font-medium focus:border-kahoot-purple focus:outline-none">
+                </div>
+            </div>
+
+            <!-- Questions List Builder -->
+            <div class="space-y-6">
+                <div class="flex justify-between items-center">
+                    <h3 class="font-extrabold text-slate-700 text-base">Список Вопросов</h3>
+                    <span id="creatorQuestionCounter" class="text-xs font-bold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">1 вопрос</span>
+                </div>
+
+                <div id="creatorQuestionsContainer" class="space-y-6">
+                    <!-- Questions Forms Injected Dynamic -->
+                </div>
+
+                <button onclick="app.addCreatorQuestionBlock()" class="w-full py-3 border-2 border-dashed border-slate-300 hover:border-kahoot-purple hover:bg-purple-50 text-kahoot-purple font-bold rounded-xl transition flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-plus"></i> Добавить вопрос
+                </button>
+            </div>
+
+            <!-- Save Button -->
+            <div class="mt-8 pt-4 border-t border-slate-200 flex gap-3">
+                <button onclick="app.saveCustomQuiz()" class="flex-1 bg-kahoot-green hover:bg-green-600 text-white font-black py-3.5 rounded-xl shadow-md transition text-center">
+                    Сохранить Викторину
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="relative z-10 py-3 text-center text-xs text-white/50 font-medium">
+        Kahoot! Clone Web Application &copy; 2026
+    </footer>
+
+    <!-- Audio FX Synthesizer Script & Application Logic -->
+    <script>
+        /**
+         * SoundFX Synthesizer using Web Audio API (No external sound files required)
+         */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+            }
+
+            playClick() {
+                if (this.muted) return;
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.05);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+
+            playCorrect() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now); // C5
+                osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                osc.frequency.setValueAtTime(1046.50, now + 0.3); // C6
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.5);
+            }
+
+            playWrong() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, now); // A3
+                osc.frequency.linearRampToValueAtTime(110, now + 0.3); // A2
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(now + 0.35);
+            }
+
+            playTick() {
+                if (this.muted) return;
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.03);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.03);
+            }
+
+            playFanfare() {
+                if (this.muted) return;
+                this.init();
+                const notes = [440, 554.37, 659.25, 880];
+                notes.forEach((freq, index) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    const startTime = this.ctx.currentTime + (index * 0.12);
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, startTime);
+                    gain.gain.setValueAtTime(0.2, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.4);
+                });
+            }
+        }
+
+        /**
+         * Main Kahoot Application Engine
+         */
+        class KahootApp {
+            constructor() {
+                this.sound = new SoundFX();
+                this.avatars = ['😎', '🤖', '🦊', '🚀', '🐱', '👑', '🍕', '🎮'];
+                this.currentAvatarIndex = 0;
+
+                // Built-in Presets
+                this.presetQuizzes = [
+                    {
+                        pin: '101101',
+                        title: 'IT & Программирование',
+                        desc: 'Тест на знания веб-разработки и IT терминов',
+                        category: 'IT & Tech',
+                        questions: [
+                            {
+                                text: 'Что означает аббревиатура HTML?',
+                                media: '💻',
+                                options: [
+                                    'HyperText Markup Language',
+                                    'High Tech Machine Language',
+                                    'Hyperlink Text Management Links',
+                                    'Home Tool Markup Language'
+                                ],
+                                correct: 0,
+                                time: 15
+                            },
+                            {
+                                text: 'Какой язык программирования используется для стилизации веб-страниц?',
+                                media: '🎨',
+                                options: ['Python', 'CSS', 'Java', 'SQL'],
+                                correct: 1,
+                                time: 15
+                            },
+                            {
+                                text: 'Какой символ используется для комментариев в JavaScript?',
+                                media: '⚡',
+                                options: ['<!-- -->', '#', '//', '/* */'],
+                                correct: 2,
+                                time: 15
+                            },
+                            {
+                                text: 'Что из перечисленного НЕ является фреймворком JavaScript?',
+                                media: '⚙️',
+                                options: ['React', 'Vue', 'Angular', 'Laravel'],
+                                correct: 3,
+                                time: 15
+                            }
+                        ]
+                    },
+                    {
+                        pin: '202202',
+                        title: 'Общие Знания & Эрудиция',
+                        desc: 'Интересные факты со всего мира',
+                        category: 'Общие знания',
+                        questions: [
+                            {
+                                text: 'Какая планета является самой большой в Солнечной системе?',
+                                media: '🪐',
+                                options: ['Марс', 'Юпитер', 'Сатурн', 'Венера'],
+                                correct: 1,
+                                time: 15
+                            },
+                            {
+                                text: 'Сколько континентов на Земле?',
+                                media: '🌍',
+                                options: ['5', '6', '7', '8'],
+                                correct: 1,
+                                time: 15
+                            },
+                            {
+                                text: 'Какое животное является самым быстрым на суше?',
+                                media: '🐆',
+                                options: ['Лев', 'Гепард', 'Сапсан', 'Антилопа'],
+                                correct: 1,
+                                time: 15
+                            }
+                        ]
+                    },
+                    {
+                        pin: '303303',
+                        title: 'Поп-культура & Кино',
+                        desc: 'Фильмы, сериалы и гик-культура',
+                        category: 'Кино',
+                        questions: [
+                            {
+                                text: 'Как зовут главного героя серии фильмов "Матрица"?',
+                                media: '🕶️',
+                                options: ['Морфеус', 'Нео', 'Тринити', 'Агент Смит'],
+                                correct: 1,
+                                time: 15
+                            },
+                            {
+                                text: 'В какой вселенной находятся Мстители?',
+                                media: '🛡️',
+                                options: ['DC Comics', 'Marvel', 'Star Wars', 'Pixar'],
+                                correct: 1,
+                                time: 15
+                            }
+                        ]
+                    }
+                ];
+
+                // Game State
+                this.activeQuiz = null;
+                this.currentQuestionIdx = 0;
+                this.playerScore = 0;
+                this.streak = 0;
+                this.maxStreak = 0;
+                this.correctAnswersCount = 0;
+                this.timerInterval = null;
+                this.timeLeft = 0;
+                this.questionStartTime = 0;
+
+                this.init();
+            }
+
+            init() {
+                this.loadCustomQuizzesFromStorage();
+                this.renderPresetsList();
+                this.initCreatorForm();
+            }
+
+            // Sound Toggle
+            toggleSound() {
+                this.sound.muted = !this.sound.muted;
+                const icon = document.getElementById('soundIcon');
+                if (this.sound.muted) {
+                    icon.className = 'fa-solid fa-volume-xmark';
+                } else {
+                    icon.className = 'fa-solid fa-volume-high';
+                    this.sound.playClick();
+                }
+            }
+
+            // Navigation Screen Switcher
+            showScreen(screenId) {
+                const screens = ['welcomeScreen', 'lobbyScreen', 'gameScreen', 'resultFeedbackScreen', 'podiumScreen', 'creatorScreen'];
+                screens.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (id === screenId) {
+                        el.classList.remove('hidden');
+                        el.classList.add('flex');
+                    } else {
+                        el.classList.add('hidden');
+                        el.classList.remove('flex');
+                    }
+                });
+                this.sound.playClick();
+            }
+
+            // Welcome Tab Swapping
+            switchWelcomeTab(tab) {
+                this.sound.playClick();
+                const presetsBtn = document.getElementById('tabPresets');
+                const pinBtn = document.getElementById('tabPin');
+                const viewPresets = document.getElementById('viewPresets');
+                const viewPin = document.getElementById('viewPin');
+
+                if (tab === 'presets') {
+                    presetsBtn.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
+                    pinBtn.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
+                    viewPresets.classList.remove('hidden');
+                    viewPin.classList.add('hidden');
+                } else {
+                    pinBtn.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
+                    presetsBtn.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
+                    viewPin.classList.remove('hidden');
+                    viewPresets.classList.add('hidden');
+                }
+            }
+
+            // Avatar Cycler
+            nextAvatar() {
+                this.currentAvatarIndex = (this.currentAvatarIndex + 1) % this.avatars.length;
+                document.getElementById('avatarBtn').innerText = this.avatars[this.currentAvatarIndex];
+                this.sound.playClick();
+            }
+
+            // Render Presets List
+            renderPresetsList() {
+                const container = document.getElementById('quizPresetList');
+                container.innerHTML = '';
+
+                this.presetQuizzes.forEach((quiz, idx) => {
+                    const card = document.createElement('div');
+                    card.className = `p-3 rounded-xl border-2 cursor-pointer transition flex items-center justify-between text-left ${idx === 0 ? 'border-kahoot-purple bg-purple-50' : 'border-slate-200 hover:border-slate-300'}`;
+                    card.onclick = () => {
+                        this.sound.playClick();
+                        document.querySelectorAll('#quizPresetList > div').forEach(c => {
+                            c.classList.remove('border-kahoot-purple', 'bg-purple-50');
+                            c.classList.add('border-slate-200');
+                        });
+                        card.classList.remove('border-slate-200');
+                        card.classList.add('border-kahoot-purple', 'bg-purple-50');
+                        this.activeQuiz = quiz;
+                    };
+
+                    card.innerHTML = `
+                        <div>
+                            <div class="font-bold text-slate-800 text-sm">${quiz.title}</div>
+                            <div class="text-xs text-slate-500">${quiz.questions.length} вопросов • PIN: ${quiz.pin}</div>
+                        </div>
+                        <i class="fa-solid fa-chevron-right text-slate-400 text-xs"></i>
+                    `;
+                    container.appendChild(card);
+                });
+
+                // Default active
+                if (this.presetQuizzes.length > 0) {
+                    this.activeQuiz = this.presetQuizzes[0];
+                }
+            }
+
+            // Load Custom Quizzes from LocalStorage
+            loadCustomQuizzesFromStorage() {
+                try {
+                    const saved = localStorage.getItem('kahoot_custom_quizzes');
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        this.presetQuizzes = [...this.presetQuizzes, ...parsed];
+                    }
+                } catch (e) {
+                    console.error('Failed to load storage quizzes', e);
+                }
+            }
+
+            // PIN Search Loader
+            loadQuizByPin() {
+                const pin = document.getElementById('pinInput').value.trim();
+                const found = this.presetQuizzes.find(q => q.pin === pin);
+                if (found) {
+                    this.activeQuiz = found;
+                    this.startLobby();
+                } else {
+                    alert('Викторина с таким PIN-кодом не найдена! (Попробуйте 101101, 202202 или 303303)');
+                }
+            }
+
+            // Start Lobby Screen
+            startLobby() {
+                const nameInput = document.getElementById('playerNameInput').value.trim();
+                const playerName = nameInput || 'Игрок 1';
+
+                if (!this.activeQuiz) {
+                    alert('Пожалуйста, выберите викторину!');
+                    return;
+                }
+
+                document.getElementById('lobbyQuizTitle').innerText = this.activeQuiz.title;
+                document.getElementById('lobbyQuizDesc').innerText = this.activeQuiz.desc;
+                document.getElementById('lobbyQuestionCount').innerText = this.activeQuiz.questions.length;
+                document.getElementById('lobbyPlayerName').innerText = playerName;
+                document.getElementById('lobbyAvatar').innerText = this.avatars[this.currentAvatarIndex];
+
+                this.showScreen('lobbyScreen');
+            }
+
+            // Start Actual Gameplay Loop
+            startQuizGame() {
+                this.currentQuestionIdx = 0;
+                this.playerScore = 0;
+                this.streak = 0;
+                this.maxStreak = 0;
+                this.correctAnswersCount = 0;
+
+                this.showScreen('gameScreen');
+                this.loadQuestion();
+            }
+
+            // Load Question State
+            loadQuestion() {
+                const q = this.activeQuiz.questions[this.currentQuestionIdx];
+                const total = this.activeQuiz.questions.length;
+
+                document.getElementById('gameProgress').innerText = `${this.currentQuestionIdx + 1} из ${total}`;
+                document.getElementById('gameCategory').innerText = this.activeQuiz.category || 'Викторина';
+                document.getElementById('gameScore').innerText = this.playerScore;
+                document.getElementById('questionText').innerText = q.text;
+                document.getElementById('questionMedia').innerText = q.media || '❓';
+
+                // Load Options
+                for (let i = 0; i < 4; i++) {
+                    const btnText = document.getElementById(`answer${i}Text`);
+                    if (q.options[i]) {
+                        btnText.innerText = q.options[i];
+                        btnText.parentElement.style.display = 'flex';
+                    } else {
+                        btnText.parentElement.style.display = 'none';
+                    }
+                }
+
+                // Timer Setup
+                this.timeLeft = q.time || 15;
+                this.questionStartTime = Date.now();
+                this.updateTimerDisplay();
+                
+                clearInterval(this.timerInterval);
+                this.timerInterval = setInterval(() => {
+                    this.timeLeft--;
+                    this.sound.playTick();
+                    this.updateTimerDisplay();
+
+                    if (this.timeLeft <= 0) {
+                        clearInterval(this.timerInterval);
+                        this.submitAnswer(-1); // Timeout
+                    }
+                }, 1000);
+            }
+
+            updateTimerDisplay() {
+                const timerEl = document.getElementById('timerDisplay');
+                timerEl.innerText = this.timeLeft;
+                if (this.timeLeft <= 5) {
+                    timerEl.classList.add('bg-red-600', 'animate-pulseFast');
+                } else {
+                    timerEl.classList.remove('bg-red-600', 'animate-pulseFast');
+                    timerEl.classList.add('bg-kahoot-purple');
+                }
+            }
+
+            // Handle Answer Submission
+            submitAnswer(optionIndex) {
+                clearInterval(this.timerInterval);
+                const q = this.activeQuiz.questions[this.currentQuestionIdx];
+                const isCorrect = optionIndex === q.correct;
+
+                let pointsEarned = 0;
+                if (isCorrect) {
+                    // Score logic based on reaction time (Kahoot formula style: up to 1000 pts)
+                    const timeTaken = (Date.now() - this.questionStartTime) / 1000;
+                    const maxTime = q.time || 15;
+                    const timeRatio = Math.max(0, 1 - (timeTaken / maxTime) / 2);
+                    
+                    this.streak++;
+                    if (this.streak > this.maxStreak) this.maxStreak = this.streak;
+                    const streakBonus = Math.min(this.streak * 50, 500);
+
+                    pointsEarned = Math.round(1000 * timeRatio) + streakBonus;
+                    this.playerScore += pointsEarned;
+                    this.correctAnswersCount++;
+
+                    this.sound.playCorrect();
+                    this.showFeedback(true, pointsEarned);
+                } else {
+                    this.streak = 0;
+                    this.sound.playWrong();
+                    this.showFeedback(false, 0);
+                }
+            }
+
+            // Show Result Feedback Card
+            showFeedback(isCorrect, points) {
+                const container = document.getElementById('feedbackIconContainer');
+                const icon = document.getElementById('feedbackIcon');
+                const title = document.getElementById('feedbackTitle');
+                const subtitle = document.getElementById('feedbackSubtitle');
+                const streakCount = document.getElementById('streakCount');
+
+                if (isCorrect) {
+                    container.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-green-500';
+                    icon.className = 'fa-solid fa-check';
+                    title.innerText = 'Правильно!';
+                    title.className = 'text-3xl font-black text-green-600 mb-1';
+                    subtitle.innerText = `+${points} очков`;
+                } else {
+                    container.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-red-500';
+                    icon.className = 'fa-solid fa-xmark';
+                    title.innerText = 'Неправильно!';
+                    title.className = 'text-3xl font-black text-red-600 mb-1';
+                    subtitle.innerText = 'В следующий раз повезет!';
+                }
+
+                streakCount.innerText = this.streak;
+                this.showScreen('resultFeedbackScreen');
+            }
+
+            // Go to Next Question or Final Podium
+            nextQuestion() {
+                this.currentQuestionIdx++;
+                if (this.currentQuestionIdx < this.activeQuiz.questions.length) {
+                    this.showScreen('gameScreen');
+                    this.loadQuestion();
+                } else {
+                    this.showPodium();
+                }
+            }
+
+            // Final Leaderboard & Podium
+            showPodium() {
+                this.sound.playFanfare();
+                
+                // Trigger Confetti
+                if (typeof confetti === 'function') {
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                }
+
+                const name = document.getElementById('lobbyPlayerName').innerText;
+                const avatar = document.getElementById('lobbyAvatar').innerText;
+
+                // Simulated Bot Scores for Competition
+                const totalQ = this.activeQuiz.questions.length;
+                const bot1Score = Math.round(totalQ * 600 * (0.6 + Math.random() * 0.3));
+                const bot2Score = Math.round(totalQ * 500 * (0.4 + Math.random() * 0.4));
+
+                // Sort Results
+                const players = [
+                    { name: name, avatar: avatar, score: this.playerScore, isUser: true },
+                    { name: 'Бот Алекс', avatar: '🤖', score: bot1Score, isUser: false },
+                    { name: 'Бот Ника', avatar: '🦊', score: bot2Score, isUser: false }
+                ].sort((a, b) => b.score - a.score);
+
+                // Render Podium Positions
+                document.getElementById('podium1Name').innerText = players[0].name;
+                document.getElementById('podium1Avatar').innerText = players[0].avatar;
+                document.getElementById('podium1Score').innerText = players[0].score;
+
+                document.getElementById('podium2Name').innerText = players[1].name;
+                document.getElementById('podium2Avatar').innerText = players[1].avatar;
+                document.getElementById('podium2Score').innerText = players[1].score;
+
+                document.getElementById('podium3Name').innerText = players[2].name;
+                document.getElementById('podium3Avatar').innerText = players[2].avatar;
+                document.getElementById('podium3Score').innerText = players[2].score;
+
+                // Accuracy Stats
+                const accuracy = Math.round((this.correctAnswersCount / totalQ) * 100);
+                document.getElementById('statAccuracy').innerText = `${accuracy}%`;
+                document.getElementById('statCorrect').innerText = `${this.correctAnswersCount}/${totalQ}`;
+                document.getElementById('statMaxStreak').innerText = `${this.maxStreak} 🔥`;
+
+                this.showScreen('podiumScreen');
+            }
+
+            restartQuiz() {
+                this.startLobby();
+            }
+
+            // ================= QUIZ CREATOR MODULE =================
+            initCreatorForm() {
+                const container = document.getElementById('creatorQuestionsContainer');
+                container.innerHTML = '';
+                this.addCreatorQuestionBlock();
+            }
+
+            addCreatorQuestionBlock() {
+                const container = document.getElementById('creatorQuestionsContainer');
+                const qIndex = container.children.length + 1;
+
+                const qBlock = document.createElement('div');
+                qBlock.className = 'bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 relative question-builder-block';
+                qBlock.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="font-black text-xs text-kahoot-purple uppercase">Вопрос #${qIndex}</span>
+                        ${qIndex > 1 ? `<button onclick="this.parentElement.parentElement.remove(); app.updateCreatorCounter();" class="text-red-500 hover:text-red-700 text-xs font-bold"><i class="fa-solid fa-trash"></i> Удалить</button>` : ''}
+                    </div>
+                    
+                    <div class="grid grid-cols-4 gap-2">
+                        <input type="text" placeholder="Текст вопроса" class="col-span-3 q-text px-3 py-2 border rounded-lg text-sm font-semibold focus:outline-none focus:border-kahoot-purple">
+                        <input type="text" placeholder="Эмодзи (💡)" class="col-span-1 q-media px-3 py-2 border rounded-lg text-sm text-center focus:outline-none focus:border-kahoot-purple" maxlength="2">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-2">
+                        <div class="flex items-center space-x-2">
+                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="0" checked class="q-correct">
+                            <input type="text" placeholder="Вариант 1 (Красный)" class="q-opt-0 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-red-300">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="1" class="q-correct">
+                            <input type="text" placeholder="Вариант 2 (Синий)" class="q-opt-1 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-blue-300">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="2" class="q-correct">
+                            <input type="text" placeholder="Вариант 3 (Желтый)" class="q-opt-2 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-yellow-300">
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="3" class="q-correct">
+                            <input type="text" placeholder="Вариант 4 (Зеленый)" class="q-opt-3 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-green-300">
+                        </div>
+                    </div>
+                `;
+
+                container.appendChild(qBlock);
+                this.updateCreatorCounter();
+            }
+
+            updateCreatorCounter() {
+                const count = document.getElementById('creatorQuestionsContainer').children.length;
+                document.getElementById('creatorQuestionCounter').innerText = `${count} ${count === 1 ? 'вопрос' : 'вопроса(-ов)'}`;
+            }
+
+            saveCustomQuiz() {
+                const title = document.getElementById('customQuizTitle').value.trim();
+                const desc = document.getElementById('customQuizDesc').value.trim();
+                const blocks = document.querySelectorAll('.question-builder-block');
+
+                if (!title) {
+                    alert('Введите название викторины!');
+                    return;
+                }
+
+                const questions = [];
+                let isValid = true;
+
+                blocks.forEach(block => {
+                    const qText = block.querySelector('.q-text').value.trim();
+                    const qMedia = block.querySelector('.q-media').value.trim() || '❓';
+                    const opt0 = block.querySelector('.q-opt-0').value.trim();
+                    const opt1 = block.querySelector('.q-opt-1').value.trim();
+                    const opt2 = block.querySelector('.q-opt-2').value.trim();
+                    const opt3 = block.querySelector('.q-opt-3').value.trim();
+                    
+                    const radios = block.querySelectorAll('.q-correct');
+                    let correctIdx = 0;
+                    radios.forEach((r, idx) => {
+                        if (r.checked) correctIdx = idx;
+                    });
+
+                    if (!qText || !opt0 || !opt1) {
+                        isValid = false;
+                    }
+
+                    questions.push({
+                        text: qText,
+                        media: qMedia,
+                        options: [opt0, opt1, opt2 || 'Вариант 3', opt3 || 'Вариант 4'],
+                        correct: correctIdx,
+                        time: 15
+                    });
+                });
+
+                if (!isValid) {
+                    alert('Заполните текст всех вопросов и минимум по 2 варианта ответа!');
+                    return;
+                }
+
+                const pin = Math.floor(100000 + Math.random() * 900000).toString();
+
+                const newQuiz = {
+                    pin: pin,
+                    title: title,
+                    desc: desc || 'Пользовательский квиз',
+                    category: 'Свой Квиз',
+                    questions: questions
+                };
+
+                // Save to state and localStorage
+                this.presetQuizzes.push(newQuiz);
+                try {
+                    const existingSaved = JSON.parse(localStorage.getItem('kahoot_custom_quizzes') || '[]');
+                    existingSaved.push(newQuiz);
+                    localStorage.setItem('kahoot_custom_quizzes', JSON.stringify(existingSaved));
+                } catch (e) {
+                    console.error('Storage save error', e);
+                }
+
+                alert(`Викторина успешно создана!\nВаш PIN-код: ${pin}`);
+                this.renderPresetsList();
+                this.showScreen('welcomeScreen');
+            }
+        }
+
+        // Initialize App on Load
+        let app;
+        window.onload = () => {
+            app = new KahootApp();
+        };
+    </script>
+</body>
+</html>
