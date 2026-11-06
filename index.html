@@ -13,6 +13,47 @@
     <!-- Canvas Confetti -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
+    <!-- Firebase SDK Modular -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Config Setup
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'kahoot-quiz-live-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : {
+                apiKey: "demo-api-key",
+                authDomain: "demo.firebaseapp.com",
+                projectId: "demo-project",
+                storageBucket: "demo.appspot.com",
+                messagingSenderId: "123456789",
+                appId: "1:123456789:web:demo"
+              };
+
+        const firebaseApp = initializeApp(firebaseConfig);
+        const db = getFirestore(firebaseApp);
+        const auth = getAuth(firebaseApp);
+
+        // Expose to window scope for game engine
+        window.fb = { db, auth, appId, doc, setDoc, getDoc, updateDoc, onSnapshot, collection };
+
+        // Authenticate
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Firebase auth failed:", err);
+            }
+        }
+        initAuth();
+    </script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -123,10 +164,13 @@
             <div class="bg-white text-kahoot-purple font-black text-2xl px-3 py-1 rounded-lg tracking-wider shadow-lg transform -rotate-2">
                 K!
             </div>
-            <span class="text-white font-extrabold text-xl tracking-tight hidden sm:inline">QuizMaster</span>
+            <span class="text-white font-extrabold text-xl tracking-tight hidden sm:inline">QuizMaster Online</span>
         </div>
         
         <div class="flex items-center space-x-3">
+            <span id="roleBadge" class="hidden text-xs font-black px-3 py-1.5 rounded-full uppercase bg-white/20 text-white border border-white/20">
+                Режим
+            </span>
             <button id="soundToggleBtn" onclick="app.toggleSound()" class="bg-white/10 hover:bg-white/20 text-white p-2.5 rounded-full transition text-sm font-semibold flex items-center justify-center w-10 h-10 border border-white/20">
                 <i class="fa-solid fa-volume-high" id="soundIcon"></i>
             </button>
@@ -142,169 +186,195 @@
         <!-- ================= 1. WELCOME SCREEN ================= -->
         <section id="welcomeScreen" class="w-full max-w-md glass-card p-6 sm:p-8 text-center my-auto transition-all duration-300">
             <div class="mb-6">
-                <h1 class="text-4xl font-black text-kahoot-purple tracking-tight mb-2">Kahoot! Clone</h1>
-                <p class="text-slate-500 font-semibold text-sm">Прокачай свои знания или создай свой квиз!</p>
+                <h1 class="text-4xl font-black text-kahoot-purple tracking-tight mb-2">Kahoot! Live</h1>
+                <p class="text-slate-500 font-semibold text-sm">Онлайн викторины в реальном времени!</p>
             </div>
 
-            <!-- PIN or Quiz Selection Tabs -->
+            <!-- Choose Mode: Join Game or Host Game -->
             <div class="space-y-4">
                 <div class="bg-slate-100 p-1.5 rounded-xl flex font-bold text-xs">
-                    <button id="tabPresets" onclick="app.switchWelcomeTab('presets')" class="flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition">Готовые Квизы</button>
-                    <button id="tabPin" onclick="app.switchWelcomeTab('pin')" class="flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition">Ввести PIN / Код</button>
+                    <button id="tabJoin" onclick="app.switchWelcomeTab('join')" class="flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition">Войти как Игрок</button>
+                    <button id="tabHost" onclick="app.switchWelcomeTab('host')" class="flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition">Создать Комнату (Host)</button>
                 </div>
 
-                <!-- Tab 1: Presets -->
-                <div id="viewPresets" class="space-y-3">
-                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Выберите тему:</label>
+                <!-- Tab 1: Join Game by PIN -->
+                <div id="viewJoin" class="space-y-3">
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">PIN-код комнаты:</label>
+                    <input type="text" id="pinInput" placeholder="6-значный PIN" maxlength="6" class="w-full text-center text-3xl font-black py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none uppercase tracking-widest text-slate-700">
+                    
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider mt-3">Имя Игрока:</label>
+                    <div class="flex items-center space-x-3">
+                        <button onclick="app.nextAvatar()" id="avatarBtn" class="text-3xl bg-slate-100 p-2 rounded-xl hover:bg-slate-200 transition border border-slate-200 flex-shrink-0" title="Сменить аватар">
+                            😎
+                        </button>
+                        <input type="text" id="playerNameInput" placeholder="Ваше Имя" maxlength="15" class="w-full font-bold px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none text-slate-800">
+                    </div>
+
+                    <button onclick="app.joinRoomAsPlayer()" class="w-full bg-kahoot-green hover:bg-green-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 transition mt-2">
+                        ВОЙТИ В ИГРУ!
+                    </button>
+                </div>
+
+                <!-- Tab 2: Host Game & Select Quiz -->
+                <div id="viewHost" class="space-y-3 hidden">
+                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Выберите квиз для трансляции:</label>
                     <div id="quizPresetList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
                         <!-- Dynamic Presets Loaded Here -->
                     </div>
+                    <button onclick="app.createRoomAsHost()" class="w-full bg-kahoot-purple hover:bg-kahoot-darkPurple text-white font-black text-lg py-3.5 rounded-xl transition shadow-md mt-2">
+                        СОЗДАТЬ КОМНАТУ 🚀
+                    </button>
                 </div>
-
-                <!-- Tab 2: Custom PIN -->
-                <div id="viewPin" class="space-y-3 hidden">
-                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Введите PIN викторины:</label>
-                    <input type="text" id="pinInput" placeholder="Например: 123456" maxlength="6" class="w-full text-center text-2xl font-black py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none uppercase tracking-widest text-slate-700">
-                    <button onclick="app.loadQuizByPin()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition shadow-md">Найти Квиз</button>
-                </div>
-
-                <hr class="border-slate-200 my-4">
-
-                <!-- Player Profile Setup -->
-                <div class="space-y-3">
-                    <label class="block text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Профиль игрока:</label>
-                    <div class="flex items-center space-x-3">
-                        <button onclick="app.nextAvatar()" id="avatarBtn" class="text-3xl bg-slate-100 p-2 rounded-xl hover:bg-slate-200 transition border border-slate-200 flex-shrink-0 title='Сменить аватар'">
-                            😎
-                        </button>
-                        <input type="text" id="playerNameInput" placeholder="Ваше Имя / Никнейм" maxlength="15" class="w-full font-bold px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-kahoot-purple focus:outline-none text-slate-800">
-                    </div>
-                </div>
-
-                <button onclick="app.startLobby()" class="w-full bg-kahoot-green hover:bg-green-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transform hover:-translate-y-0.5 active:translate-y-0 transition mt-2">
-                    ИГРАТЬ!
-                </button>
             </div>
         </section>
 
-        <!-- ================= 2. LOBBY / WAITING SCREEN ================= -->
-        <section id="lobbyScreen" class="w-full max-w-lg glass-card p-8 text-center hidden flex-col items-center">
-            <div class="inline-block bg-kahoot-purple text-white px-4 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-widest mb-4">
-                Готов к старту
+        <!-- ================= 2. HOST LOBBY SCREEN ================= -->
+        <section id="hostLobbyScreen" class="w-full max-w-2xl glass-card p-6 sm:p-8 text-center hidden flex-col items-center">
+            <div class="inline-block bg-kahoot-purple text-white px-4 py-1.5 rounded-full text-xs font-extrabold uppercase tracking-widest mb-3">
+                Экран Ведущего (Host Screen)
             </div>
-            <h2 id="lobbyQuizTitle" class="text-2xl font-black text-slate-800 mb-2">Название Квиза</h2>
-            <p id="lobbyQuizDesc" class="text-slate-500 text-sm mb-6">Количество вопросов: <span id="lobbyQuestionCount">0</span></p>
-
-            <div class="w-full bg-slate-50 border border-slate-200 p-6 rounded-2xl mb-8 flex flex-col items-center">
-                <div id="lobbyAvatar" class="text-6xl mb-3 animate-bounceShort">😎</div>
-                <div id="lobbyPlayerName" class="text-xl font-black text-slate-800">Имя Игрока</div>
-                <div class="text-xs font-bold text-slate-400 mt-1">Игрок №1 (Соло Режим)</div>
+            
+            <div class="bg-purple-100 border-2 border-kahoot-purple p-4 rounded-2xl w-full mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="text-left">
+                    <div class="text-xs font-extrabold text-slate-500 uppercase">Присоединяйтесь по PIN-коду:</div>
+                    <div id="hostRoomPin" class="text-4xl sm:text-5xl font-black text-kahoot-purple tracking-widest">000000</div>
+                </div>
+                <div class="text-right sm:text-right text-center">
+                    <div id="hostQuizTitle" class="font-extrabold text-slate-800 text-lg">Название Викторины</div>
+                    <div id="hostPlayerCount" class="text-sm font-bold text-slate-500">Подключено игроков: <span class="text-kahoot-purple font-black text-lg">0</span></div>
+                </div>
             </div>
 
-            <button onclick="app.startQuizGame()" class="w-full bg-kahoot-blue hover:bg-blue-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transition">
-                НАЧАТЬ ИГРУ <i class="fa-solid fa-play ml-2"></i>
+            <!-- Dynamic Live Players Grid -->
+            <div class="w-full min-h-[160px] bg-slate-50 border border-slate-200 p-4 rounded-2xl mb-6">
+                <div class="text-xs font-bold text-slate-400 uppercase mb-3 text-left">Игроки в лобби:</div>
+                <div id="hostPlayersList" class="flex flex-wrap gap-3 justify-center max-h-48 overflow-y-auto">
+                    <span class="text-slate-400 italic text-sm">Ожидание игроков...</span>
+                </div>
+            </div>
+
+            <button onclick="app.hostStartGame()" class="w-full bg-kahoot-green hover:bg-green-600 text-white font-black text-xl py-4 rounded-xl shadow-lg transition">
+                НАЧАТЬ ИГРУДЛЯ ВСЕХ <i class="fa-solid fa-play ml-2"></i>
             </button>
         </section>
 
-        <!-- ================= 3. GAME QUESTION SCREEN ================= -->
-        <section id="gameScreen" class="w-full max-w-4xl hidden flex-col space-y-4 my-auto">
-            
-            <!-- Top Game Bar: Progress, Timer, Score -->
+        <!-- ================= 3. PLAYER WAITING LOBBY ================= -->
+        <section id="playerWaitingScreen" class="w-full max-w-md glass-card p-8 text-center hidden flex-col items-center">
+            <div class="text-6xl mb-4 animate-bounceShort" id="waitingPlayerAvatar">😎</div>
+            <h2 id="waitingPlayerName" class="text-2xl font-black text-slate-800 mb-1">Игрок</h2>
+            <p class="text-slate-500 font-bold text-sm mb-6">Вы успешно подключились к комнате!</p>
+            <div class="w-full bg-purple-50 border border-purple-200 p-4 rounded-xl text-kahoot-purple font-extrabold text-sm animate-pulseFast">
+                Ожидайте запуска игры ведущим...
+            </div>
+        </section>
+
+        <!-- ================= 4. HOST GAMEPLAY QUESTION SCREEN ================= -->
+        <section id="hostGameScreen" class="w-full max-w-4xl hidden flex-col space-y-4 my-auto">
+            <!-- Top Game Bar -->
             <div class="flex justify-between items-center bg-white/95 backdrop-blur-md px-6 py-3 rounded-2xl shadow-lg">
-                <div class="flex items-center space-x-3">
-                    <span class="text-xs font-black bg-slate-200 text-slate-700 px-3 py-1 rounded-full uppercase" id="gameProgress">
-                        1 / 5
-                    </span>
-                    <span class="text-xs font-bold text-slate-500 hidden sm:inline" id="gameCategory">
-                        Категория
-                    </span>
+                <span class="text-xs font-black bg-slate-200 text-slate-700 px-3 py-1 rounded-full uppercase" id="hostGameProgress">
+                    1 / 5
+                </span>
+                <div id="hostTimerDisplay" class="w-12 h-12 rounded-full bg-kahoot-purple text-white font-black text-lg flex items-center justify-center shadow-md">
+                    15
                 </div>
-
-                <!-- Circular Visual Timer -->
-                <div class="relative flex items-center justify-center">
-                    <div id="timerDisplay" class="w-12 h-12 rounded-full bg-kahoot-purple text-white font-black text-lg flex items-center justify-center shadow-md">
-                        15
-                    </div>
-                </div>
-
                 <div class="text-right">
-                    <div class="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Очки</div>
-                    <div class="text-xl font-black text-kahoot-purple" id="gameScore">0</div>
+                    <div class="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Ответов</div>
+                    <div class="text-xl font-black text-kahoot-purple" id="hostAnswersCount">0 / 0</div>
                 </div>
             </div>
 
             <!-- Question Box -->
-            <div class="glass-card p-6 sm:p-8 text-center min-h-[180px] flex flex-col justify-center items-center relative">
-                <h2 id="questionText" class="text-xl sm:text-2xl md:text-3xl font-extrabold text-slate-800 leading-snug">
-                    Текст вопроса здесь?
+            <div class="glass-card p-6 sm:p-8 text-center min-h-[180px] flex flex-col justify-center items-center">
+                <h2 id="hostQuestionText" class="text-xl sm:text-2xl md:text-3xl font-extrabold text-slate-800 leading-snug">
+                    Вопрос для всех игроков?
                 </h2>
-                <!-- Optional Emoji/Icon media -->
-                <div id="questionMedia" class="text-5xl mt-4">💡</div>
+                <div id="hostQuestionMedia" class="text-5xl mt-4">💡</div>
             </div>
 
-            <!-- Answer Buttons Grid -->
+            <!-- Answer Options (Host Preview) -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <button onclick="app.submitAnswer(0)" class="btn-kahoot btn-red text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
-                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
-                        <i class="fa-solid fa-triangle text-white"></i>
-                    </span>
-                    <span id="answer0Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 1</span>
-                </button>
-
-                <button onclick="app.submitAnswer(1)" class="btn-kahoot btn-blue text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
-                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
-                        <i class="fa-solid fa-diamond text-white"></i>
-                    </span>
-                    <span id="answer1Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 2</span>
-                </button>
-
-                <button onclick="app.submitAnswer(2)" class="btn-kahoot btn-yellow text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
-                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
-                        <i class="fa-solid fa-circle text-white"></i>
-                    </span>
-                    <span id="answer2Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 3</span>
-                </button>
-
-                <button onclick="app.submitAnswer(3)" class="btn-kahoot btn-green text-white p-4 sm:p-6 rounded-2xl flex items-center space-x-4 text-left group">
-                    <span class="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center text-xl flex-shrink-0">
-                        <i class="fa-solid fa-square text-white"></i>
-                    </span>
-                    <span id="answer3Text" class="font-bold text-lg sm:text-xl flex-grow leading-tight">Вариант 4</span>
-                </button>
-            </div>
-        </section>
-
-        <!-- ================= 4. QUESTION RESULT SCREEN ================= -->
-        <section id="resultFeedbackScreen" class="w-full max-w-md glass-card p-8 text-center hidden flex-col items-center my-auto">
-            <div id="feedbackIconContainer" class="w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg">
-                <i id="feedbackIcon" class="fa-solid fa-check"></i>
-            </div>
-            
-            <h2 id="feedbackTitle" class="text-3xl font-black mb-1">Правильно!</h2>
-            <p id="feedbackSubtitle" class="text-slate-500 font-bold text-sm mb-4">+950 очков за скорость</p>
-
-            <!-- Streak Counter -->
-            <div id="streakBox" class="bg-orange-100 border border-orange-200 text-orange-700 font-black px-4 py-2 rounded-xl text-sm mb-6 flex items-center gap-2">
-                <i class="fa-solid fa-fire text-orange-500"></i>
-                <span>Серия ответов (Streak): <span id="streakCount">0</span></span>
+                <div class="btn-kahoot btn-red text-white p-4 rounded-2xl flex items-center space-x-4">
+                    <span class="w-8 h-8 rounded-lg bg-black/20 flex items-center justify-center font-black"><i class="fa-solid fa-triangle"></i></span>
+                    <span id="hostOpt0" class="font-bold text-lg">Вариант 1</span>
+                </div>
+                <div class="btn-kahoot btn-blue text-white p-4 rounded-2xl flex items-center space-x-4">
+                    <span class="w-8 h-8 rounded-lg bg-black/20 flex items-center justify-center font-black"><i class="fa-solid fa-diamond"></i></span>
+                    <span id="hostOpt1" class="font-bold text-lg">Вариант 2</span>
+                </div>
+                <div class="btn-kahoot btn-yellow text-white p-4 rounded-2xl flex items-center space-x-4">
+                    <span class="w-8 h-8 rounded-lg bg-black/20 flex items-center justify-center font-black"><i class="fa-solid fa-circle"></i></span>
+                    <span id="hostOpt2" class="font-bold text-lg">Вариант 3</span>
+                </div>
+                <div class="btn-kahoot btn-green text-white p-4 rounded-2xl flex items-center space-x-4">
+                    <span class="w-8 h-8 rounded-lg bg-black/20 flex items-center justify-center font-black"><i class="fa-solid fa-square"></i></span>
+                    <span id="hostOpt3" class="font-bold text-lg">Вариант 4</span>
+                </div>
             </div>
 
-            <button onclick="app.nextQuestion()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-lg py-3 rounded-xl transition shadow-md">
-                Далее <i class="fa-solid fa-arrow-right ml-1"></i>
+            <button onclick="app.hostForceNext()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl transition shadow-md">
+                Завершить вопрос досрочно <i class="fa-solid fa-forward ml-1"></i>
             </button>
         </section>
 
-        <!-- ================= 5. FINAL LEADERBOARD / PODIUM ================= -->
-        <section id="podiumScreen" class="w-full max-w-2xl glass-card p-6 sm:p-10 text-center hidden flex-col items-center my-auto">
-            <h2 class="text-3xl sm:text-4xl font-black text-kahoot-purple mb-1">Викторина Завершена!</h2>
-            <p class="text-slate-500 font-bold text-sm mb-6">Результаты вашей игры</p>
+        <!-- ================= 5. PLAYER CONTROLLER / GAMEPAD SCREEN ================= -->
+        <section id="playerGameScreen" class="w-full max-w-lg hidden flex-col space-y-4 my-auto">
+            <div class="flex justify-between items-center bg-white/95 backdrop-blur-md px-6 py-3 rounded-2xl shadow-lg">
+                <div class="text-xs font-bold text-slate-500">Выберите цвет на экране ведущего</div>
+                <div class="text-right">
+                    <span class="text-xs font-extrabold text-slate-400 uppercase">Очки:</span>
+                    <span id="playerScoreDisplay" class="text-lg font-black text-kahoot-purple ml-1">0</span>
+                </div>
+            </div>
 
-            <!-- Podium Visual (Solo + Bots for competition feel) -->
+            <div id="playerButtonsGrid" class="grid grid-cols-2 gap-4 h-80 sm:h-96">
+                <button onclick="app.playerSubmitAnswer(0)" class="btn-kahoot btn-red text-white rounded-3xl flex items-center justify-center text-4xl sm:text-5xl shadow-lg">
+                    <i class="fa-solid fa-triangle"></i>
+                </button>
+                <button onclick="app.playerSubmitAnswer(1)" class="btn-kahoot btn-blue text-white rounded-3xl flex items-center justify-center text-4xl sm:text-5xl shadow-lg">
+                    <i class="fa-solid fa-diamond"></i>
+                </button>
+                <button onclick="app.playerSubmitAnswer(2)" class="btn-kahoot btn-yellow text-white rounded-3xl flex items-center justify-center text-4xl sm:text-5xl shadow-lg">
+                    <i class="fa-solid fa-circle"></i>
+                </button>
+                <button onclick="app.playerSubmitAnswer(3)" class="btn-kahoot btn-green text-white rounded-3xl flex items-center justify-center text-4xl sm:text-5xl shadow-lg">
+                    <i class="fa-solid fa-square"></i>
+                </button>
+            </div>
+
+            <!-- Submitted Feedback Lock Overlay -->
+            <div id="playerSubmittedOverlay" class="hidden glass-card p-8 text-center flex-col items-center justify-center h-80">
+                <i class="fa-solid fa-circle-check text-6xl text-green-500 mb-4 animate-bounceShort"></i>
+                <h3 class="text-2xl font-black text-slate-800 mb-1">Ответ принят!</h3>
+                <p class="text-slate-500 font-bold text-sm">Ждите окончания времени вопроса...</p>
+            </div>
+        </section>
+
+        <!-- ================= 6. PLAYER FEEDBACK SCREEN ================= -->
+        <section id="playerFeedbackScreen" class="w-full max-w-md glass-card p-8 text-center hidden flex-col items-center my-auto">
+            <div id="pFeedbackIconContainer" class="w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg">
+                <i id="pFeedbackIcon" class="fa-solid fa-check"></i>
+            </div>
+            
+            <h2 id="pFeedbackTitle" class="text-3xl font-black mb-1">Правильно!</h2>
+            <p id="pFeedbackSubtitle" class="text-slate-500 font-bold text-sm mb-4">+950 очков</p>
+
+            <div class="bg-purple-50 border border-purple-200 text-kahoot-purple font-black px-4 py-2 rounded-xl text-sm mb-2">
+                Текущее место: <span id="playerRankDisplay">#1</span>
+            </div>
+        </section>
+
+        <!-- ================= 7. LEADERBOARD / PODIUM (HOST & PLAYER) ================= -->
+        <section id="podiumScreen" class="w-full max-w-2xl glass-card p-6 sm:p-10 text-center hidden flex-col items-center my-auto">
+            <h2 class="text-3xl sm:text-4xl font-black text-kahoot-purple mb-1" id="podiumHeaderTitle">Результаты Викторины!</h2>
+            <p class="text-slate-500 font-bold text-sm mb-6" id="podiumHeaderSubtitle">Итоговый лидерборд</p>
+
+            <!-- Top 3 Podium Visual -->
             <div class="w-full flex justify-center items-end gap-2 sm:gap-4 mb-8 h-48 border-b-4 border-slate-200 pb-2">
                 <!-- 2nd Place -->
                 <div class="flex-1 flex flex-col items-center">
-                    <div id="podium2Avatar" class="text-2xl sm:text-3xl mb-1">🤖</div>
-                    <div id="podium2Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">Бот Аген</div>
+                    <div id="podium2Avatar" class="text-2xl sm:text-3xl mb-1">🥈</div>
+                    <div id="podium2Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">-</div>
                     <div id="podium2Score" class="text-xs font-black text-slate-400 mb-1">0</div>
                     <div class="w-full bg-slate-300 h-24 rounded-t-lg flex items-center justify-center font-black text-slate-600 text-xl">2</div>
                 </div>
@@ -312,48 +382,34 @@
                 <!-- 1st Place (Winner) -->
                 <div class="flex-1 flex flex-col items-center">
                     <div class="text-yellow-500 text-xl animate-bounceShort"><i class="fa-solid fa-crown"></i></div>
-                    <div id="podium1Avatar" class="text-3xl sm:text-4xl mb-1">😎</div>
-                    <div id="podium1Name" class="text-sm font-black text-slate-800 truncate max-w-[100px]">Игрок</div>
+                    <div id="podium1Avatar" class="text-3xl sm:text-4xl mb-1">🥇</div>
+                    <div id="podium1Name" class="text-sm font-black text-slate-800 truncate max-w-[100px]">-</div>
                     <div id="podium1Score" class="text-xs font-black text-kahoot-purple mb-1">0</div>
                     <div class="w-full bg-yellow-400 h-36 rounded-t-lg flex items-center justify-center font-black text-yellow-900 text-2xl shadow-md">1</div>
                 </div>
 
                 <!-- 3rd Place -->
                 <div class="flex-1 flex flex-col items-center">
-                    <div id="podium3Avatar" class="text-2xl sm:text-3xl mb-1">👾</div>
-                    <div id="podium3Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">Бот Нео</div>
+                    <div id="podium3Avatar" class="text-2xl sm:text-3xl mb-1">🥉</div>
+                    <div id="podium3Name" class="text-xs font-bold text-slate-600 truncate max-w-[80px]">-</div>
                     <div id="podium3Score" class="text-xs font-black text-slate-400 mb-1">0</div>
                     <div class="w-full bg-amber-700/30 h-16 rounded-t-lg flex items-center justify-center font-black text-amber-900 text-lg">3</div>
                 </div>
             </div>
 
-            <!-- Stats Overview -->
-            <div class="grid grid-cols-3 gap-3 w-full mb-6">
-                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                    <div class="text-xs text-slate-400 font-bold uppercase">Точность</div>
-                    <div id="statAccuracy" class="text-lg sm:text-xl font-black text-slate-700">0%</div>
-                </div>
-                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                    <div class="text-xs text-slate-400 font-bold uppercase">Правильно</div>
-                    <div id="statCorrect" class="text-lg sm:text-xl font-black text-green-600">0/0</div>
-                </div>
-                <div class="bg-slate-50 border border-slate-200 p-3 rounded-xl">
-                    <div class="text-xs text-slate-400 font-bold uppercase">Макс. Стрик</div>
-                    <div id="statMaxStreak" class="text-lg sm:text-xl font-black text-orange-500">0 🔥</div>
-                </div>
+            <!-- Host Action Controls -->
+            <div id="hostLeaderboardControls" class="w-full space-y-3">
+                <button id="hostNextQuestionBtn" onclick="app.hostAdvanceNextQuestion()" class="w-full bg-kahoot-purple hover:bg-kahoot-darkPurple text-white font-black py-4 rounded-xl transition shadow-lg text-lg">
+                    Следующий вопрос <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
             </div>
 
-            <div class="flex flex-col sm:flex-row gap-3 w-full">
-                <button onclick="app.restartQuiz()" class="flex-1 bg-kahoot-purple hover:bg-kahoot-darkPurple text-white font-bold py-3 rounded-xl transition">
-                    <i class="fa-solid fa-rotate-right mr-1"></i> Играть снова
-                </button>
-                <button onclick="app.showScreen('welcomeScreen')" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-xl transition">
-                    Главное меню
-                </button>
-            </div>
+            <button onclick="app.showScreen('welcomeScreen')" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-xl transition mt-3">
+                Главное меню
+            </button>
         </section>
 
-        <!-- ================= 6. QUIZ CREATOR SCREEN ================= -->
+        <!-- ================= 8. QUIZ CREATOR SCREEN ================= -->
         <section id="creatorScreen" class="w-full max-w-2xl glass-card p-6 sm:p-8 hidden flex-col my-auto max-h-[85vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-6 border-b border-slate-200 pb-4">
                 <div>
@@ -514,7 +570,7 @@
         }
 
         /**
-         * Main Kahoot Application Engine
+         * Main Kahoot Application Engine (Firestore Realtime Multiplayer Enabled)
          */
         class KahootApp {
             constructor() {
@@ -593,41 +649,21 @@
                                 time: 15
                             }
                         ]
-                    },
-                    {
-                        pin: '303303',
-                        title: 'Поп-культура & Кино',
-                        desc: 'Фильмы, сериалы и гик-культура',
-                        category: 'Кино',
-                        questions: [
-                            {
-                                text: 'Как зовут главного героя серии фильмов "Матрица"?',
-                                media: '🕶️',
-                                options: ['Морфеус', 'Нео', 'Тринити', 'Агент Смит'],
-                                correct: 1,
-                                time: 15
-                            },
-                            {
-                                text: 'В какой вселенной находятся Мстители?',
-                                media: '🛡️',
-                                options: ['DC Comics', 'Marvel', 'Star Wars', 'Pixar'],
-                                correct: 1,
-                                time: 15
-                            }
-                        ]
                     }
                 ];
 
-                // Game State
+                // Multiplayer State
+                this.role = null; // 'host' or 'player'
+                this.roomPin = null;
+                this.playerId = null;
+                this.playerName = '';
+                this.playerAvatar = '😎';
+                this.roomUnsubscribe = null;
                 this.activeQuiz = null;
                 this.currentQuestionIdx = 0;
-                this.playerScore = 0;
-                this.streak = 0;
-                this.maxStreak = 0;
-                this.correctAnswersCount = 0;
                 this.timerInterval = null;
-                this.timeLeft = 0;
                 this.questionStartTime = 0;
+                this.hasAnsweredCurrent = false;
 
                 this.init();
             }
@@ -636,9 +672,9 @@
                 this.loadCustomQuizzesFromStorage();
                 this.renderPresetsList();
                 this.initCreatorForm();
+                this.playerId = 'player_' + Math.random().toString(36).substr(2, 9);
             }
 
-            // Sound Toggle
             toggleSound() {
                 this.sound.muted = !this.sound.muted;
                 const icon = document.getElementById('soundIcon');
@@ -650,51 +686,62 @@
                 }
             }
 
-            // Navigation Screen Switcher
             showScreen(screenId) {
-                const screens = ['welcomeScreen', 'lobbyScreen', 'gameScreen', 'resultFeedbackScreen', 'podiumScreen', 'creatorScreen'];
+                const screens = [
+                    'welcomeScreen', 'hostLobbyScreen', 'playerWaitingScreen', 
+                    'hostGameScreen', 'playerGameScreen', 'playerFeedbackScreen', 
+                    'podiumScreen', 'creatorScreen'
+                ];
                 screens.forEach(id => {
                     const el = document.getElementById(id);
-                    if (id === screenId) {
-                        el.classList.remove('hidden');
-                        el.classList.add('flex');
-                    } else {
-                        el.classList.add('hidden');
-                        el.classList.remove('flex');
+                    if (el) {
+                        if (id === screenId) {
+                            el.classList.remove('hidden');
+                            el.classList.add('flex');
+                        } else {
+                            el.classList.add('hidden');
+                            el.classList.remove('flex');
+                        }
                     }
                 });
+
+                const badge = document.getElementById('roleBadge');
+                if (this.role) {
+                    badge.classList.remove('hidden');
+                    badge.innerText = this.role === 'host' ? '👑 ВЕДУЩИЙ' : '🎮 ИГРОК';
+                } else {
+                    badge.classList.add('hidden');
+                }
                 this.sound.playClick();
             }
 
-            // Welcome Tab Swapping
             switchWelcomeTab(tab) {
                 this.sound.playClick();
-                const presetsBtn = document.getElementById('tabPresets');
-                const pinBtn = document.getElementById('tabPin');
-                const viewPresets = document.getElementById('viewPresets');
-                const viewPin = document.getElementById('viewPin');
+                const tabJoin = document.getElementById('tabJoin');
+                const tabHost = document.getElementById('tabHost');
+                const viewJoin = document.getElementById('viewJoin');
+                const viewHost = document.getElementById('viewHost');
 
-                if (tab === 'presets') {
-                    presetsBtn.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
-                    pinBtn.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
-                    viewPresets.classList.remove('hidden');
-                    viewPin.classList.add('hidden');
+                if (tab === 'join') {
+                    tabJoin.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
+                    tabHost.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
+                    viewJoin.classList.remove('hidden');
+                    viewHost.classList.add('hidden');
                 } else {
-                    pinBtn.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
-                    presetsBtn.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
-                    viewPin.classList.remove('hidden');
-                    viewPresets.classList.add('hidden');
+                    tabHost.className = 'flex-1 py-2 rounded-lg bg-white shadow-sm text-kahoot-purple transition';
+                    tabJoin.className = 'flex-1 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition';
+                    viewHost.classList.remove('hidden');
+                    viewJoin.classList.add('hidden');
                 }
             }
 
-            // Avatar Cycler
             nextAvatar() {
                 this.currentAvatarIndex = (this.currentAvatarIndex + 1) % this.avatars.length;
-                document.getElementById('avatarBtn').innerText = this.avatars[this.currentAvatarIndex];
+                this.playerAvatar = this.avatars[this.currentAvatarIndex];
+                document.getElementById('avatarBtn').innerText = this.playerAvatar;
                 this.sound.playClick();
             }
 
-            // Render Presets List
             renderPresetsList() {
                 const container = document.getElementById('quizPresetList');
                 container.innerHTML = '';
@@ -716,20 +763,18 @@
                     card.innerHTML = `
                         <div>
                             <div class="font-bold text-slate-800 text-sm">${quiz.title}</div>
-                            <div class="text-xs text-slate-500">${quiz.questions.length} вопросов • PIN: ${quiz.pin}</div>
+                            <div class="text-xs text-slate-500">${quiz.questions.length} вопросов</div>
                         </div>
                         <i class="fa-solid fa-chevron-right text-slate-400 text-xs"></i>
                     `;
                     container.appendChild(card);
                 });
 
-                // Default active
                 if (this.presetQuizzes.length > 0) {
                     this.activeQuiz = this.presetQuizzes[0];
                 }
             }
 
-            // Load Custom Quizzes from LocalStorage
             loadCustomQuizzesFromStorage() {
                 try {
                     const saved = localStorage.getItem('kahoot_custom_quizzes');
@@ -742,219 +787,347 @@
                 }
             }
 
-            // PIN Search Loader
-            loadQuizByPin() {
-                const pin = document.getElementById('pinInput').value.trim();
-                const found = this.presetQuizzes.find(q => q.pin === pin);
-                if (found) {
-                    this.activeQuiz = found;
-                    this.startLobby();
-                } else {
-                    alert('Викторина с таким PIN-кодом не найдена! (Попробуйте 101101, 202202 или 303303)');
-                }
+            // ================= MULTIPLAYER REALTIME ENGINE =================
+
+            // Get Firestore Doc Reference following mandatory path rules
+            getRoomRef(pin) {
+                return window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'rooms', pin);
             }
 
-            // Start Lobby Screen
-            startLobby() {
-                const nameInput = document.getElementById('playerNameInput').value.trim();
-                const playerName = nameInput || 'Игрок 1';
-
+            // 1. HOST: Create Room
+            async createRoomAsHost() {
                 if (!this.activeQuiz) {
-                    alert('Пожалуйста, выберите викторину!');
+                    alert('Выберите викторину!');
                     return;
                 }
 
-                document.getElementById('lobbyQuizTitle').innerText = this.activeQuiz.title;
-                document.getElementById('lobbyQuizDesc').innerText = this.activeQuiz.desc;
-                document.getElementById('lobbyQuestionCount').innerText = this.activeQuiz.questions.length;
-                document.getElementById('lobbyPlayerName').innerText = playerName;
-                document.getElementById('lobbyAvatar').innerText = this.avatars[this.currentAvatarIndex];
+                this.role = 'host';
+                this.roomPin = Math.floor(100000 + Math.random() * 900000).toString();
+                document.getElementById('hostRoomPin').innerText = this.roomPin;
+                document.getElementById('hostQuizTitle').innerText = this.activeQuiz.title;
 
-                this.showScreen('lobbyScreen');
+                const roomRef = this.getRoomRef(this.roomPin);
+                const roomData = {
+                    pin: this.roomPin,
+                    state: 'lobby', // 'lobby', 'question', 'leaderboard', 'finished'
+                    quiz: this.activeQuiz,
+                    currentQuestionIdx: 0,
+                    players: {},
+                    answers: {},
+                    questionStartTime: 0
+                };
+
+                await window.fb.setDoc(roomRef, roomData);
+                this.showScreen('hostLobbyScreen');
+                this.listenRoom();
             }
 
-            // Start Actual Gameplay Loop
-            startQuizGame() {
-                this.currentQuestionIdx = 0;
-                this.playerScore = 0;
-                this.streak = 0;
-                this.maxStreak = 0;
-                this.correctAnswersCount = 0;
+            // 2. PLAYER: Join Room
+            async joinRoomAsPlayer() {
+                const pin = document.getElementById('pinInput').value.trim();
+                const name = document.getElementById('playerNameInput').value.trim() || 'Игрок';
 
-                this.showScreen('gameScreen');
-                this.loadQuestion();
+                if (!pin || pin.length !== 6) {
+                    alert('Введите 6-значный PIN!');
+                    return;
+                }
+
+                this.role = 'player';
+                this.roomPin = pin;
+                this.playerName = name;
+
+                const roomRef = this.getRoomRef(pin);
+                const snap = await window.fb.getDoc(roomRef);
+
+                if (!snap.exists()) {
+                    alert('Комната с таким PIN не найдена!');
+                    return;
+                }
+
+                const roomData = snap.data();
+                if (roomData.state !== 'lobby') {
+                    alert('Игра уже началась или завершена!');
+                    return;
+                }
+
+                // Register player in room
+                roomData.players[this.playerId] = {
+                    id: this.playerId,
+                    name: this.playerName,
+                    avatar: this.playerAvatar,
+                    score: 0,
+                    streak: 0
+                };
+
+                await window.fb.updateDoc(roomRef, { players: roomData.players });
+
+                document.getElementById('waitingPlayerName').innerText = this.playerName;
+                document.getElementById('waitingPlayerAvatar').innerText = this.playerAvatar;
+
+                this.showScreen('playerWaitingScreen');
+                this.listenRoom();
             }
 
-            // Load Question State
-            loadQuestion() {
-                const q = this.activeQuiz.questions[this.currentQuestionIdx];
-                const total = this.activeQuiz.questions.length;
+            // Realtime Room Listener for Sync
+            listenRoom() {
+                if (this.roomUnsubscribe) this.roomUnsubscribe();
 
-                document.getElementById('gameProgress').innerText = `${this.currentQuestionIdx + 1} из ${total}`;
-                document.getElementById('gameCategory').innerText = this.activeQuiz.category || 'Викторина';
-                document.getElementById('gameScore').innerText = this.playerScore;
-                document.getElementById('questionText').innerText = q.text;
-                document.getElementById('questionMedia').innerText = q.media || '❓';
+                const roomRef = this.getRoomRef(this.roomPin);
+                this.roomUnsubscribe = window.fb.onSnapshot(roomRef, (docSnap) => {
+                    if (!docSnap.exists()) return;
+                    const data = docSnap.data();
+                    this.onRoomStateUpdate(data);
+                }, (error) => {
+                    console.error("Room listener error:", error);
+                });
+            }
 
-                // Load Options
-                for (let i = 0; i < 4; i++) {
-                    const btnText = document.getElementById(`answer${i}Text`);
-                    if (q.options[i]) {
-                        btnText.innerText = q.options[i];
-                        btnText.parentElement.style.display = 'flex';
-                    } else {
-                        btnText.parentElement.style.display = 'none';
+            // Room State Machine Dispatcher
+            onRoomStateUpdate(data) {
+                const players = Object.values(data.players || {});
+
+                // HOST LOBBY UPDATES
+                if (this.role === 'host' && data.state === 'lobby') {
+                    document.getElementById('hostPlayerCount').innerHTML = `Подключено игроков: <span class="text-kahoot-purple font-black text-lg">${players.length}</span>`;
+                    const list = document.getElementById('hostPlayersList');
+                    list.innerHTML = players.map(p => `
+                        <div class="bg-white px-3 py-1.5 border border-slate-200 rounded-xl font-bold text-slate-800 text-sm shadow-sm flex items-center gap-1.5">
+                            <span>${p.avatar}</span> <span>${p.name}</span>
+                        </div>
+                    `).join('') || '<span class="text-slate-400 italic text-sm">Ожидание игроков...</span>';
+                }
+
+                // QUESTION STATE TRANSITION
+                if (data.state === 'question') {
+                    this.currentQuestionIdx = data.currentQuestionIdx;
+                    this.questionStartTime = data.questionStartTime;
+
+                    if (this.role === 'host') {
+                        this.renderHostQuestion(data);
+                    } else if (this.role === 'player') {
+                        this.renderPlayerGamepad(data);
                     }
                 }
 
-                // Timer Setup
-                this.timeLeft = q.time || 15;
-                this.questionStartTime = Date.now();
-                this.updateTimerDisplay();
-                
+                // LEADERBOARD / PODIUM TRANSITION
+                if (data.state === 'leaderboard' || data.state === 'finished') {
+                    this.renderPodium(data);
+                }
+            }
+
+            // 3. HOST: Start Game
+            async hostStartGame() {
+                const roomRef = this.getRoomRef(this.roomPin);
+                await window.fb.updateDoc(roomRef, {
+                    state: 'question',
+                    currentQuestionIdx: 0,
+                    questionStartTime: Date.now(),
+                    answers: {}
+                });
+            }
+
+            // Render Host Question View
+            renderHostQuestion(data) {
+                const q = data.quiz.questions[data.currentQuestionIdx];
+                const total = data.quiz.questions.length;
+                const answers = Object.keys(data.answers || {}).length;
+                const playersCount = Object.keys(data.players || {}).length;
+
+                document.getElementById('hostGameProgress').innerText = `${data.currentQuestionIdx + 1} из ${total}`;
+                document.getElementById('hostQuestionText').innerText = q.text;
+                document.getElementById('hostQuestionMedia').innerText = q.media || '💡';
+                document.getElementById('hostOpt0').innerText = q.options[0] || '';
+                document.getElementById('hostOpt1').innerText = q.options[1] || '';
+                document.getElementById('hostOpt2').innerText = q.options[2] || '';
+                document.getElementById('hostOpt3').innerText = q.options[3] || '';
+                document.getElementById('hostAnswersCount').innerText = `${answers} / ${playersCount}`;
+
+                this.showScreen('hostGameScreen');
+
+                // Start countdown
+                let timeLeft = q.time || 15;
+                const timerEl = document.getElementById('hostTimerDisplay');
+                timerEl.innerText = timeLeft;
+
                 clearInterval(this.timerInterval);
                 this.timerInterval = setInterval(() => {
-                    this.timeLeft--;
+                    timeLeft--;
+                    timerEl.innerText = timeLeft;
                     this.sound.playTick();
-                    this.updateTimerDisplay();
 
-                    if (this.timeLeft <= 0) {
+                    if (timeLeft <= 0) {
                         clearInterval(this.timerInterval);
-                        this.submitAnswer(-1); // Timeout
+                        this.hostFinishQuestion();
                     }
                 }, 1000);
             }
 
-            updateTimerDisplay() {
-                const timerEl = document.getElementById('timerDisplay');
-                timerEl.innerText = this.timeLeft;
-                if (this.timeLeft <= 5) {
-                    timerEl.classList.add('bg-red-600', 'animate-pulseFast');
-                } else {
-                    timerEl.classList.remove('bg-red-600', 'animate-pulseFast');
-                    timerEl.classList.add('bg-kahoot-purple');
-                }
-            }
-
-            // Handle Answer Submission
-            submitAnswer(optionIndex) {
-                clearInterval(this.timerInterval);
-                const q = this.activeQuiz.questions[this.currentQuestionIdx];
-                const isCorrect = optionIndex === q.correct;
-
-                let pointsEarned = 0;
-                if (isCorrect) {
-                    // Score logic based on reaction time (Kahoot formula style: up to 1000 pts)
-                    const timeTaken = (Date.now() - this.questionStartTime) / 1000;
-                    const maxTime = q.time || 15;
-                    const timeRatio = Math.max(0, 1 - (timeTaken / maxTime) / 2);
-                    
-                    this.streak++;
-                    if (this.streak > this.maxStreak) this.maxStreak = this.streak;
-                    const streakBonus = Math.min(this.streak * 50, 500);
-
-                    pointsEarned = Math.round(1000 * timeRatio) + streakBonus;
-                    this.playerScore += pointsEarned;
-                    this.correctAnswersCount++;
-
-                    this.sound.playCorrect();
-                    this.showFeedback(true, pointsEarned);
-                } else {
-                    this.streak = 0;
-                    this.sound.playWrong();
-                    this.showFeedback(false, 0);
-                }
-            }
-
-            // Show Result Feedback Card
-            showFeedback(isCorrect, points) {
-                const container = document.getElementById('feedbackIconContainer');
-                const icon = document.getElementById('feedbackIcon');
-                const title = document.getElementById('feedbackTitle');
-                const subtitle = document.getElementById('feedbackSubtitle');
-                const streakCount = document.getElementById('streakCount');
-
-                if (isCorrect) {
-                    container.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-green-500';
-                    icon.className = 'fa-solid fa-check';
-                    title.innerText = 'Правильно!';
-                    title.className = 'text-3xl font-black text-green-600 mb-1';
-                    subtitle.innerText = `+${points} очков`;
-                } else {
-                    container.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-red-500';
-                    icon.className = 'fa-solid fa-xmark';
-                    title.innerText = 'Неправильно!';
-                    title.className = 'text-3xl font-black text-red-600 mb-1';
-                    subtitle.innerText = 'В следующий раз повезет!';
-                }
-
-                streakCount.innerText = this.streak;
-                this.showScreen('resultFeedbackScreen');
-            }
-
-            // Go to Next Question or Final Podium
-            nextQuestion() {
-                this.currentQuestionIdx++;
-                if (this.currentQuestionIdx < this.activeQuiz.questions.length) {
-                    this.showScreen('gameScreen');
-                    this.loadQuestion();
-                } else {
-                    this.showPodium();
-                }
-            }
-
-            // Final Leaderboard & Podium
-            showPodium() {
-                this.sound.playFanfare();
+            // Render Player Gamepad View
+            renderPlayerGamepad(data) {
+                this.hasAnsweredCurrent = false;
+                const pData = data.players[this.playerId];
+                document.getElementById('playerScoreDisplay').innerText = pData ? pData.score : 0;
                 
-                // Trigger Confetti
-                if (typeof confetti === 'function') {
-                    confetti({
-                        particleCount: 100,
-                        spread: 70,
-                        origin: { y: 0.6 }
-                    });
-                }
+                document.getElementById('playerButtonsGrid').classList.remove('hidden');
+                document.getElementById('playerSubmittedOverlay').classList.add('hidden');
+                document.getElementById('playerSubmittedOverlay').classList.remove('flex');
 
-                const name = document.getElementById('lobbyPlayerName').innerText;
-                const avatar = document.getElementById('lobbyAvatar').innerText;
-
-                // Simulated Bot Scores for Competition
-                const totalQ = this.activeQuiz.questions.length;
-                const bot1Score = Math.round(totalQ * 600 * (0.6 + Math.random() * 0.3));
-                const bot2Score = Math.round(totalQ * 500 * (0.4 + Math.random() * 0.4));
-
-                // Sort Results
-                const players = [
-                    { name: name, avatar: avatar, score: this.playerScore, isUser: true },
-                    { name: 'Бот Алекс', avatar: '🤖', score: bot1Score, isUser: false },
-                    { name: 'Бот Ника', avatar: '🦊', score: bot2Score, isUser: false }
-                ].sort((a, b) => b.score - a.score);
-
-                // Render Podium Positions
-                document.getElementById('podium1Name').innerText = players[0].name;
-                document.getElementById('podium1Avatar').innerText = players[0].avatar;
-                document.getElementById('podium1Score').innerText = players[0].score;
-
-                document.getElementById('podium2Name').innerText = players[1].name;
-                document.getElementById('podium2Avatar').innerText = players[1].avatar;
-                document.getElementById('podium2Score').innerText = players[1].score;
-
-                document.getElementById('podium3Name').innerText = players[2].name;
-                document.getElementById('podium3Avatar').innerText = players[2].avatar;
-                document.getElementById('podium3Score').innerText = players[2].score;
-
-                // Accuracy Stats
-                const accuracy = Math.round((this.correctAnswersCount / totalQ) * 100);
-                document.getElementById('statAccuracy').innerText = `${accuracy}%`;
-                document.getElementById('statCorrect').innerText = `${this.correctAnswersCount}/${totalQ}`;
-                document.getElementById('statMaxStreak').innerText = `${this.maxStreak} 🔥`;
-
-                this.showScreen('podiumScreen');
+                this.showScreen('playerGameScreen');
             }
 
-            restartQuiz() {
-                this.startLobby();
+            // 4. PLAYER: Submit Answer
+            async playerSubmitAnswer(optionIdx) {
+                if (this.hasAnsweredCurrent) return;
+                this.hasAnsweredCurrent = true;
+                this.sound.playClick();
+
+                document.getElementById('playerButtonsGrid').classList.add('hidden');
+                document.getElementById('playerSubmittedOverlay').classList.remove('hidden');
+                document.getElementById('playerSubmittedOverlay').classList.add('flex');
+
+                const roomRef = this.getRoomRef(this.roomPin);
+                const snap = await window.fb.getDoc(roomRef);
+                if (!snap.exists()) return;
+
+                const data = snap.data();
+                const q = data.quiz.questions[data.currentQuestionIdx];
+                const isCorrect = optionIdx === q.correct;
+                const timeTaken = (Date.now() - data.questionStartTime) / 1000;
+                const maxTime = q.time || 15;
+
+                let points = 0;
+                let newStreak = (data.players[this.playerId]?.streak || 0);
+
+                if (isCorrect) {
+                    newStreak++;
+                    const timeRatio = Math.max(0, 1 - (timeTaken / maxTime) / 2);
+                    points = Math.round(1000 * timeRatio) + Math.min(newStreak * 50, 500);
+                } else {
+                    newStreak = 0;
+                }
+
+                // Update answers & player scores in Firestore
+                const updatedAnswers = data.answers || {};
+                updatedAnswers[this.playerId] = {
+                    optionIdx,
+                    isCorrect,
+                    points
+                };
+
+                const updatedPlayers = data.players || {};
+                if (updatedPlayers[this.playerId]) {
+                    updatedPlayers[this.playerId].score += points;
+                    updatedPlayers[this.playerId].streak = newStreak;
+                }
+
+                await window.fb.updateDoc(roomRef, {
+                    answers: updatedAnswers,
+                    players: updatedPlayers
+                });
+            }
+
+            // 5. HOST: End Question & Go to Leaderboard
+            async hostForceNext() {
+                clearInterval(this.timerInterval);
+                this.hostFinishQuestion();
+            }
+
+            async hostFinishQuestion() {
+                const roomRef = this.getRoomRef(this.roomPin);
+                const snap = await window.fb.getDoc(roomRef);
+                if (!snap.exists()) return;
+
+                const data = snap.data();
+                const isLast = data.currentQuestionIdx >= data.quiz.questions.length - 1;
+
+                await window.fb.updateDoc(roomRef, {
+                    state: isLast ? 'finished' : 'leaderboard'
+                });
+            }
+
+            // 6. HOST: Advance to Next Question
+            async hostAdvanceNextQuestion() {
+                const roomRef = this.getRoomRef(this.roomPin);
+                const snap = await window.fb.getDoc(roomRef);
+                if (!snap.exists()) return;
+
+                const data = snap.data();
+                await window.fb.updateDoc(roomRef, {
+                    state: 'question',
+                    currentQuestionIdx: data.currentQuestionIdx + 1,
+                    questionStartTime: Date.now(),
+                    answers: {}
+                });
+            }
+
+            // Render Podium & Leaderboard for Host / Player Feedback
+            renderPodium(data) {
+                const players = Object.values(data.players || {}).sort((a, b) => b.score - a.score);
+
+                // Check Player Feedback
+                if (this.role === 'player') {
+                    const myAnswer = data.answers ? data.answers[this.playerId] : null;
+                    const myRank = players.findIndex(p => p.id === this.playerId) + 1;
+
+                    if (myAnswer) {
+                        const iconContainer = document.getElementById('pFeedbackIconContainer');
+                        const icon = document.getElementById('pFeedbackIcon');
+                        const title = document.getElementById('pFeedbackTitle');
+                        const sub = document.getElementById('pFeedbackSubtitle');
+
+                        if (myAnswer.isCorrect) {
+                            iconContainer.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-green-500';
+                            icon.className = 'fa-solid fa-check';
+                            title.innerText = 'Правильно!';
+                            title.className = 'text-3xl font-black text-green-600 mb-1';
+                            sub.innerText = `+${myAnswer.points} очков`;
+                            this.sound.playCorrect();
+                        } else {
+                            iconContainer.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-red-500';
+                            icon.className = 'fa-solid fa-xmark';
+                            title.innerText = 'Неправильно!';
+                            title.className = 'text-3xl font-black text-red-600 mb-1';
+                            sub.innerText = 'В следующий раз повезет!';
+                            this.sound.playWrong();
+                        }
+
+                        document.getElementById('playerRankDisplay').innerText = `#${myRank > 0 ? myRank : '-'}`;
+                        this.showScreen('playerFeedbackScreen');
+                        return;
+                    }
+                }
+
+                // Render Top 3 Podium
+                this.sound.playFanfare();
+                if (typeof confetti === 'function' && data.state === 'finished') {
+                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                }
+
+                const p1 = players[0] || { name: '-', avatar: '🥇', score: 0 };
+                const p2 = players[1] || { name: '-', avatar: '🥈', score: 0 };
+                const p3 = players[2] || { name: '-', avatar: '🥉', score: 0 };
+
+                document.getElementById('podium1Name').innerText = p1.name;
+                document.getElementById('podium1Avatar').innerText = p1.avatar;
+                document.getElementById('podium1Score').innerText = p1.score;
+
+                document.getElementById('podium2Name').innerText = p2.name;
+                document.getElementById('podium2Avatar').innerText = p2.avatar;
+                document.getElementById('podium2Score').innerText = p2.score;
+
+                document.getElementById('podium3Name').innerText = p3.name;
+                document.getElementById('podium3Avatar').innerText = p3.avatar;
+                document.getElementById('podium3Score').innerText = p3.score;
+
+                const hostCtrl = document.getElementById('hostLeaderboardControls');
+                if (this.role === 'host' && data.state !== 'finished') {
+                    hostCtrl.classList.remove('hidden');
+                } else {
+                    hostCtrl.classList.add('hidden');
+                }
+
+                document.getElementById('podiumHeaderTitle').innerText = data.state === 'finished' ? 'Викторина Завершена!' : 'Лидерборд';
+                this.showScreen('podiumScreen');
             }
 
             // ================= QUIZ CREATOR MODULE =================
