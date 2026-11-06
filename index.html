@@ -23,24 +23,25 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'kahoot-quiz-live-app';
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
-            : {
-                apiKey: "demo-api-key",
-                authDomain: "demo.firebaseapp.com",
-                projectId: "demo-project",
-                storageBucket: "demo.appspot.com",
-                messagingSenderId: "123456789",
-                appId: "1:123456789:web:demo"
-              };
+            : null;
 
-        const firebaseApp = initializeApp(firebaseConfig);
-        const db = getFirestore(firebaseApp);
-        const auth = getAuth(firebaseApp);
+        let db = null, auth = null;
+        if (firebaseConfig && firebaseConfig.apiKey !== "demo-api-key") {
+            try {
+                const firebaseApp = initializeApp(firebaseConfig);
+                db = getFirestore(firebaseApp);
+                auth = getAuth(firebaseApp);
+            } catch(e) {
+                console.warn("Firebase init failed, using Local Fallback Engine", e);
+            }
+        }
 
         // Expose to window scope for game engine
         window.fb = { db, auth, appId, doc, setDoc, getDoc, updateDoc, onSnapshot, collection };
 
         // Authenticate
         async function initAuth() {
+            if (!auth) return;
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
@@ -48,7 +49,7 @@
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.error("Firebase auth failed:", err);
+                console.warn("Firebase auth fallback triggered:", err);
             }
         }
         initAuth();
@@ -791,6 +792,7 @@
 
             // Get Firestore Doc Reference following mandatory path rules
             getRoomRef(pin) {
+                if (!window.fb.db) return null;
                 return window.fb.doc(window.fb.db, 'artifacts', window.fb.appId, 'public', 'data', 'rooms', pin);
             }
 
@@ -806,7 +808,6 @@
                 document.getElementById('hostRoomPin').innerText = this.roomPin;
                 document.getElementById('hostQuizTitle').innerText = this.activeQuiz.title;
 
-                const roomRef = this.getRoomRef(this.roomPin);
                 const roomData = {
                     pin: this.roomPin,
                     state: 'lobby', // 'lobby', 'question', 'leaderboard', 'finished'
@@ -817,8 +818,21 @@
                     questionStartTime: 0
                 };
 
-                await window.fb.setDoc(roomRef, roomData);
+                // Fallback Memory Store for smooth execution if DB unavailable
+                window.localRooms = window.localRooms || {};
+                window.localRooms[this.roomPin] = roomData;
+
+                const roomRef = this.getRoomRef(this.roomPin);
+                if (roomRef) {
+                    try {
+                        await window.fb.setDoc(roomRef, roomData);
+                    } catch (e) {
+                        console.warn("Using local room state due to Firestore unavailability:", e);
+                    }
+                }
+
                 this.showScreen('hostLobbyScreen');
+                this.onRoomStateUpdate(roomData);
                 this.listenRoom();
             }
 
@@ -836,15 +850,29 @@
                 this.roomPin = pin;
                 this.playerName = name;
 
+                let roomData = null;
                 const roomRef = this.getRoomRef(pin);
-                const snap = await window.fb.getDoc(roomRef);
 
-                if (!snap.exists()) {
+                if (roomRef) {
+                    try {
+                        const snap = await window.fb.getDoc(roomRef);
+                        if (snap.exists()) {
+                            roomData = snap.data();
+                        }
+                    } catch (e) {
+                        console.warn("Firestore fetch fallback:", e);
+                    }
+                }
+
+                if (!roomData && window.localRooms && window.localRooms[pin]) {
+                    roomData = window.localRooms[pin];
+                }
+
+                if (!roomData) {
                     alert('Комната с таким PIN не найдена!');
                     return;
                 }
 
-                const roomData = snap.data();
                 if (roomData.state !== 'lobby') {
                     alert('Игра уже началась или завершена!');
                     return;
@@ -859,7 +887,17 @@
                     streak: 0
                 };
 
-                await window.fb.updateDoc(roomRef, { players: roomData.players });
+                if (roomRef) {
+                    try {
+                        await window.fb.updateDoc(roomRef, { players: roomData.players });
+                    } catch (e) {
+                        console.warn("Updating local fallback player registration");
+                    }
+                }
+                
+                if (window.localRooms && window.localRooms[pin]) {
+                    window.localRooms[pin].players = roomData.players;
+                }
 
                 document.getElementById('waitingPlayerName').innerText = this.playerName;
                 document.getElementById('waitingPlayerAvatar').innerText = this.playerAvatar;
@@ -873,17 +911,28 @@
                 if (this.roomUnsubscribe) this.roomUnsubscribe();
 
                 const roomRef = this.getRoomRef(this.roomPin);
-                this.roomUnsubscribe = window.fb.onSnapshot(roomRef, (docSnap) => {
-                    if (!docSnap.exists()) return;
-                    const data = docSnap.data();
-                    this.onRoomStateUpdate(data);
-                }, (error) => {
-                    console.error("Room listener error:", error);
-                });
+                if (roomRef) {
+                    this.roomUnsubscribe = window.fb.onSnapshot(roomRef, (docSnap) => {
+                        if (!docSnap.exists()) return;
+                        const data = docSnap.data();
+                        this.onRoomStateUpdate(data);
+                    }, (error) => {
+                        console.warn("Room listener fallback active:", error);
+                    });
+                }
+
+                // Local Fallback Polling Loop for offline/local state sync
+                if (this.localPollInterval) clearInterval(this.localPollInterval);
+                this.localPollInterval = setInterval(() => {
+                    if (window.localRooms && window.localRooms[this.roomPin]) {
+                        this.onRoomStateUpdate(window.localRooms[this.roomPin]);
+                    }
+                }, 500);
             }
 
             // Room State Machine Dispatcher
             onRoomStateUpdate(data) {
+                if (!data) return;
                 const players = Object.values(data.players || {});
 
                 // HOST LOBBY UPDATES
@@ -918,12 +967,24 @@
             // 3. HOST: Start Game
             async hostStartGame() {
                 const roomRef = this.getRoomRef(this.roomPin);
-                await window.fb.updateDoc(roomRef, {
+                const updates = {
                     state: 'question',
                     currentQuestionIdx: 0,
                     questionStartTime: Date.now(),
                     answers: {}
-                });
+                };
+
+                if (window.localRooms && window.localRooms[this.roomPin]) {
+                    Object.assign(window.localRooms[this.roomPin], updates);
+                }
+
+                if (roomRef) {
+                    try {
+                        await window.fb.updateDoc(roomRef, updates);
+                    } catch (e) {
+                        console.warn("Host start game fallback");
+                    }
+                }
             }
 
             // Render Host Question View
@@ -985,11 +1046,20 @@
                 document.getElementById('playerSubmittedOverlay').classList.remove('hidden');
                 document.getElementById('playerSubmittedOverlay').classList.add('flex');
 
+                let data = window.localRooms ? window.localRooms[this.roomPin] : null;
                 const roomRef = this.getRoomRef(this.roomPin);
-                const snap = await window.fb.getDoc(roomRef);
-                if (!snap.exists()) return;
 
-                const data = snap.data();
+                if (roomRef) {
+                    try {
+                        const snap = await window.fb.getDoc(roomRef);
+                        if (snap.exists()) data = snap.data();
+                    } catch (e) {
+                        console.warn("Fetch fallback on answer submit");
+                    }
+                }
+
+                if (!data) return;
+
                 const q = data.quiz.questions[data.currentQuestionIdx];
                 const isCorrect = optionIdx === q.correct;
                 const timeTaken = (Date.now() - data.questionStartTime) / 1000;
@@ -1006,7 +1076,7 @@
                     newStreak = 0;
                 }
 
-                // Update answers & player scores in Firestore
+                // Update answers & player scores
                 const updatedAnswers = data.answers || {};
                 updatedAnswers[this.playerId] = {
                     optionIdx,
@@ -1020,10 +1090,21 @@
                     updatedPlayers[this.playerId].streak = newStreak;
                 }
 
-                await window.fb.updateDoc(roomRef, {
-                    answers: updatedAnswers,
-                    players: updatedPlayers
-                });
+                if (window.localRooms && window.localRooms[this.roomPin]) {
+                    window.localRooms[this.roomPin].answers = updatedAnswers;
+                    window.localRooms[this.roomPin].players = updatedPlayers;
+                }
+
+                if (roomRef) {
+                    try {
+                        await window.fb.updateDoc(roomRef, {
+                            answers: updatedAnswers,
+                            players: updatedPlayers
+                        });
+                    } catch (e) {
+                        console.warn("Update fallback on answer submit");
+                    }
+                }
             }
 
             // 5. HOST: End Question & Go to Leaderboard
@@ -1033,104 +1114,165 @@
             }
 
             async hostFinishQuestion() {
+                let data = window.localRooms ? window.localRooms[this.roomPin] : null;
                 const roomRef = this.getRoomRef(this.roomPin);
-                const snap = await window.fb.getDoc(roomRef);
-                if (!snap.exists()) return;
 
-                const data = snap.data();
+                if (roomRef) {
+                    try {
+                        const snap = await window.fb.getDoc(roomRef);
+                        if (snap.exists()) data = snap.data();
+                    } catch (e) {
+                        console.warn("Finish question fetch fallback");
+                    }
+                }
+
+                if (!data) return;
                 const isLast = data.currentQuestionIdx >= data.quiz.questions.length - 1;
+                const newState = isLast ? 'finished' : 'leaderboard';
 
-                await window.fb.updateDoc(roomRef, {
-                    state: isLast ? 'finished' : 'leaderboard'
-                });
+                if (window.localRooms && window.localRooms[this.roomPin]) {
+                    window.localRooms[this.roomPin].state = newState;
+                }
+
+                if (roomRef) {
+                    try {
+                        await window.fb.updateDoc(roomRef, { state: newState });
+                    } catch (e) {
+                        console.warn("Finish question update fallback");
+                    }
+                }
             }
 
             // 6. HOST: Advance to Next Question
             async hostAdvanceNextQuestion() {
+                let data = window.localRooms ? window.localRooms[this.roomPin] : null;
                 const roomRef = this.getRoomRef(this.roomPin);
-                const snap = await window.fb.getDoc(roomRef);
-                if (!snap.exists()) return;
 
-                const data = snap.data();
-                await window.fb.updateDoc(roomRef, {
+                if (roomRef) {
+                    try {
+                        const snap = await window.fb.getDoc(roomRef);
+                        if (snap.exists()) data = snap.data();
+                    } catch (e) {
+                        console.warn("Advance question fetch fallback");
+                    }
+                }
+
+                if (!data) return;
+
+                const updates = {
                     state: 'question',
                     currentQuestionIdx: data.currentQuestionIdx + 1,
                     questionStartTime: Date.now(),
                     answers: {}
-                });
+                };
+
+                if (window.localRooms && window.localRooms[this.roomPin]) {
+                    Object.assign(window.localRooms[this.roomPin], updates);
+                }
+
+                if (roomRef) {
+                    try {
+                        await window.fb.updateDoc(roomRef, updates);
+                    } catch (e) {
+                        console.warn("Advance question update fallback");
+                    }
+                }
             }
 
             // Render Podium & Leaderboard for Host / Player Feedback
             renderPodium(data) {
                 const players = Object.values(data.players || {}).sort((a, b) => b.score - a.score);
+                const isFinished = data.state === 'finished';
 
-                // Check Player Feedback
+                // Host Controls Visibility
+                const hostControls = document.getElementById('hostLeaderboardControls');
+                const nextBtn = document.getElementById('hostNextQuestionBtn');
+                
+                if (this.role === 'host') {
+                    hostControls.classList.remove('hidden');
+                    if (isFinished) {
+                        nextBtn.classList.add('hidden');
+                    } else {
+                        nextBtn.classList.remove('hidden');
+                    }
+                } else {
+                    hostControls.classList.add('hidden');
+                }
+
+                // Header titles
+                document.getElementById('podiumHeaderTitle').innerText = isFinished ? '🎉 Итоговый Подиум!' : 'Лидерборд!';
+                document.getElementById('podiumHeaderSubtitle').innerText = isFinished ? 'Победители викторины' : `Раунд ${data.currentQuestionIdx + 1} из ${data.quiz.questions.length}`;
+
+                // Fill Top 3
+                const p1 = players[0] || { avatar: '👑', name: '-', score: 0 };
+                const p2 = players[1] || { avatar: '🥈', name: '-', score: 0 };
+                const p3 = players[2] || { avatar: '🥉', name: '-', score: 0 };
+
+                document.getElementById('podium1Avatar').innerText = p1.avatar;
+                document.getElementById('podium1Name').innerText = p1.name;
+                document.getElementById('podium1Score').innerText = `${p1.score} pt`;
+
+                document.getElementById('podium2Avatar').innerText = p2.avatar;
+                document.getElementById('podium2Name').innerText = p2.name;
+                document.getElementById('podium2Score').innerText = `${p2.score} pt`;
+
+                document.getElementById('podium3Avatar').innerText = p3.avatar;
+                document.getElementById('podium3Name').innerText = p3.name;
+                document.getElementById('podium3Score').innerText = `${p3.score} pt`;
+
+                // Confetti on final victory
+                if (isFinished && typeof confetti === 'function') {
+                    this.sound.playFanfare();
+                    confetti({
+                        particleCount: 100,
+                        spread: 70,
+                        origin: { y: 0.6 }
+                    });
+                }
+
+                // If current client is Player, show feedback card first or directly podium
                 if (this.role === 'player') {
-                    const myAnswer = data.answers ? data.answers[this.playerId] : null;
+                    const myAns = data.answers ? data.answers[this.playerId] : null;
                     const myRank = players.findIndex(p => p.id === this.playerId) + 1;
 
-                    if (myAnswer) {
+                    if (myAns && !this.feedbackShownForCurrent) {
+                        this.feedbackShownForCurrent = true;
                         const iconContainer = document.getElementById('pFeedbackIconContainer');
                         const icon = document.getElementById('pFeedbackIcon');
                         const title = document.getElementById('pFeedbackTitle');
-                        const sub = document.getElementById('pFeedbackSubtitle');
+                        const subtitle = document.getElementById('pFeedbackSubtitle');
+                        const rankEl = document.getElementById('playerRankDisplay');
 
-                        if (myAnswer.isCorrect) {
+                        rankEl.innerText = myRank > 0 ? `#${myRank}` : '-';
+
+                        if (myAns.isCorrect) {
+                            this.sound.playCorrect();
                             iconContainer.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-green-500';
                             icon.className = 'fa-solid fa-check';
                             title.innerText = 'Правильно!';
                             title.className = 'text-3xl font-black text-green-600 mb-1';
-                            sub.innerText = `+${myAnswer.points} очков`;
-                            this.sound.playCorrect();
+                            subtitle.innerText = `+${myAns.points} очков`;
                         } else {
+                            this.sound.playWrong();
                             iconContainer.className = 'w-20 h-20 rounded-full flex items-center justify-center text-4xl text-white mb-4 shadow-lg bg-red-500';
                             icon.className = 'fa-solid fa-xmark';
-                            title.innerText = 'Неправильно!';
+                            title.innerText = 'Неверно!';
                             title.className = 'text-3xl font-black text-red-600 mb-1';
-                            sub.innerText = 'В следующий раз повезет!';
-                            this.sound.playWrong();
+                            subtitle.innerText = '+0 очков';
                         }
 
-                        document.getElementById('playerRankDisplay').innerText = `#${myRank > 0 ? myRank : '-'}`;
                         this.showScreen('playerFeedbackScreen');
+                        setTimeout(() => {
+                            this.showScreen('podiumScreen');
+                        }, 3000);
                         return;
                     }
                 }
 
-                // Render Top 3 Podium
-                this.sound.playFanfare();
-                if (typeof confetti === 'function' && data.state === 'finished') {
-                    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-                }
-
-                const p1 = players[0] || { name: '-', avatar: '🥇', score: 0 };
-                const p2 = players[1] || { name: '-', avatar: '🥈', score: 0 };
-                const p3 = players[2] || { name: '-', avatar: '🥉', score: 0 };
-
-                document.getElementById('podium1Name').innerText = p1.name;
-                document.getElementById('podium1Avatar').innerText = p1.avatar;
-                document.getElementById('podium1Score').innerText = p1.score;
-
-                document.getElementById('podium2Name').innerText = p2.name;
-                document.getElementById('podium2Avatar').innerText = p2.avatar;
-                document.getElementById('podium2Score').innerText = p2.score;
-
-                document.getElementById('podium3Name').innerText = p3.name;
-                document.getElementById('podium3Avatar').innerText = p3.avatar;
-                document.getElementById('podium3Score').innerText = p3.score;
-
-                const hostCtrl = document.getElementById('hostLeaderboardControls');
-                if (this.role === 'host' && data.state !== 'finished') {
-                    hostCtrl.classList.remove('hidden');
-                } else {
-                    hostCtrl.classList.add('hidden');
-                }
-
-                document.getElementById('podiumHeaderTitle').innerText = data.state === 'finished' ? 'Викторина Завершена!' : 'Лидерборд';
                 this.showScreen('podiumScreen');
             }
 
-            // ================= QUIZ CREATOR MODULE =================
+            // ================= 7. QUIZ CREATOR MODULE =================
             initCreatorForm() {
                 const container = document.getElementById('creatorQuestionsContainer');
                 container.innerHTML = '';
@@ -1139,122 +1281,113 @@
 
             addCreatorQuestionBlock() {
                 const container = document.getElementById('creatorQuestionsContainer');
-                const qIndex = container.children.length + 1;
+                const idx = container.children.length;
 
-                const qBlock = document.createElement('div');
-                qBlock.className = 'bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 relative question-builder-block';
-                qBlock.innerHTML = `
+                const card = document.createElement('div');
+                card.className = 'p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 relative';
+                card.innerHTML = `
                     <div class="flex justify-between items-center">
-                        <span class="font-black text-xs text-kahoot-purple uppercase">Вопрос #${qIndex}</span>
-                        ${qIndex > 1 ? `<button onclick="this.parentElement.parentElement.remove(); app.updateCreatorCounter();" class="text-red-500 hover:text-red-700 text-xs font-bold"><i class="fa-solid fa-trash"></i> Удалить</button>` : ''}
-                    </div>
-                    
-                    <div class="grid grid-cols-4 gap-2">
-                        <input type="text" placeholder="Текст вопроса" class="col-span-3 q-text px-3 py-2 border rounded-lg text-sm font-semibold focus:outline-none focus:border-kahoot-purple">
-                        <input type="text" placeholder="Эмодзи (💡)" class="col-span-1 q-media px-3 py-2 border rounded-lg text-sm text-center focus:outline-none focus:border-kahoot-purple" maxlength="2">
+                        <span class="font-extrabold text-xs text-kahoot-purple uppercase">Вопрос #${idx + 1}</span>
+                        ${idx > 0 ? `<button onclick="this.parentElement.parentElement.remove(); app.updateCreatorCounter();" class="text-red-500 hover:text-red-700 text-xs font-bold"><i class="fa-solid fa-trash"></i> Удалить</button>` : ''}
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2 pt-2">
-                        <div class="flex items-center space-x-2">
-                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="0" checked class="q-correct">
-                            <input type="text" placeholder="Вариант 1 (Красный)" class="q-opt-0 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-red-300">
+                    <div>
+                        <input type="text" placeholder="Текст вопроса" class="q-text w-full px-3 py-2 border border-slate-300 rounded-xl font-bold text-sm focus:outline-none focus:border-kahoot-purple">
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div class="flex items-center space-x-2 bg-red-50 p-2 rounded-xl border border-red-200">
+                            <input type="radio" name="correct_${idx}" value="0" checked class="q-correct">
+                            <input type="text" placeholder="Вариант 1 (Красный)" class="q-opt0 w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold">
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="1" class="q-correct">
-                            <input type="text" placeholder="Вариант 2 (Синий)" class="q-opt-1 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-blue-300">
+                        <div class="flex items-center space-x-2 bg-blue-50 p-2 rounded-xl border border-blue-200">
+                            <input type="radio" name="correct_${idx}" value="1" class="q-correct">
+                            <input type="text" placeholder="Вариант 2 (Синий)" class="q-opt1 w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold">
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="2" class="q-correct">
-                            <input type="text" placeholder="Вариант 3 (Желтый)" class="q-opt-2 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-yellow-300">
+                        <div class="flex items-center space-x-2 bg-yellow-50 p-2 rounded-xl border border-yellow-200">
+                            <input type="radio" name="correct_${idx}" value="2" class="q-correct">
+                            <input type="text" placeholder="Вариант 3 (Желтый)" class="q-opt2 w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold">
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <input type="radio" name="correct_${Date.now()}_${qIndex}" value="3" class="q-correct">
-                            <input type="text" placeholder="Вариант 4 (Зеленый)" class="q-opt-3 w-full px-2.5 py-1.5 border rounded-lg text-xs font-medium border-green-300">
+                        <div class="flex items-center space-x-2 bg-green-50 p-2 rounded-xl border border-green-200">
+                            <input type="radio" name="correct_${idx}" value="3" class="q-correct">
+                            <input type="text" placeholder="Вариант 4 (Зеленый)" class="q-opt3 w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-semibold">
                         </div>
                     </div>
                 `;
 
-                container.appendChild(qBlock);
+                container.appendChild(card);
                 this.updateCreatorCounter();
             }
 
             updateCreatorCounter() {
-                const count = document.getElementById('creatorQuestionsContainer').children.length;
-                document.getElementById('creatorQuestionCounter').innerText = `${count} ${count === 1 ? 'вопрос' : 'вопроса(-ов)'}`;
+                const container = document.getElementById('creatorQuestionsContainer');
+                const counter = document.getElementById('creatorQuestionCounter');
+                counter.innerText = `${container.children.length} вопр.`;
             }
 
             saveCustomQuiz() {
                 const title = document.getElementById('customQuizTitle').value.trim();
-                const desc = document.getElementById('customQuizDesc').value.trim();
-                const blocks = document.querySelectorAll('.question-builder-block');
+                const desc = document.getElementById('customQuizDesc').value.trim() || 'Пользовательский квиз';
 
                 if (!title) {
                     alert('Введите название викторины!');
                     return;
                 }
 
+                const blocks = document.querySelectorAll('#creatorQuestionsContainer > div');
                 const questions = [];
-                let isValid = true;
 
-                blocks.forEach(block => {
-                    const qText = block.querySelector('.q-text').value.trim();
-                    const qMedia = block.querySelector('.q-media').value.trim() || '❓';
-                    const opt0 = block.querySelector('.q-opt-0').value.trim();
-                    const opt1 = block.querySelector('.q-opt-1').value.trim();
-                    const opt2 = block.querySelector('.q-opt-2').value.trim();
-                    const opt3 = block.querySelector('.q-opt-3').value.trim();
+                blocks.forEach(b => {
+                    const text = b.querySelector('.q-text').value.trim();
+                    const opt0 = b.querySelector('.q-opt0').value.trim() || 'Вариант 1';
+                    const opt1 = b.querySelector('.q-opt1').value.trim() || 'Вариант 2';
+                    const opt2 = b.querySelector('.q-opt2').value.trim() || 'Вариант 3';
+                    const opt3 = b.querySelector('.q-opt3').value.trim() || 'Вариант 4';
                     
-                    const radios = block.querySelectorAll('.q-correct');
+                    const radios = b.querySelectorAll('.q-correct');
                     let correctIdx = 0;
-                    radios.forEach((r, idx) => {
-                        if (r.checked) correctIdx = idx;
-                    });
+                    radios.forEach((r, i) => { if (r.checked) correctIdx = i; });
 
-                    if (!qText || !opt0 || !opt1) {
-                        isValid = false;
+                    if (text) {
+                        questions.push({
+                            text,
+                            media: '❓',
+                            options: [opt0, opt1, opt2, opt3],
+                            correct: correctIdx,
+                            time: 15
+                        });
                     }
-
-                    questions.push({
-                        text: qText,
-                        media: qMedia,
-                        options: [opt0, opt1, opt2 || 'Вариант 3', opt3 || 'Вариант 4'],
-                        correct: correctIdx,
-                        time: 15
-                    });
                 });
 
-                if (!isValid) {
-                    alert('Заполните текст всех вопросов и минимум по 2 варианта ответа!');
+                if (questions.length === 0) {
+                    alert('Заполните хотя бы один вопрос!');
                     return;
                 }
 
-                const pin = Math.floor(100000 + Math.random() * 900000).toString();
-
                 const newQuiz = {
-                    pin: pin,
-                    title: title,
-                    desc: desc || 'Пользовательский квиз',
-                    category: 'Свой Квиз',
-                    questions: questions
+                    pin: Math.floor(100000 + Math.random() * 900000).toString(),
+                    title,
+                    desc,
+                    category: 'Пользовательский',
+                    questions
                 };
 
-                // Save to state and localStorage
                 this.presetQuizzes.push(newQuiz);
                 try {
-                    const existingSaved = JSON.parse(localStorage.getItem('kahoot_custom_quizzes') || '[]');
-                    existingSaved.push(newQuiz);
-                    localStorage.setItem('kahoot_custom_quizzes', JSON.stringify(existingSaved));
-                } catch (e) {
-                    console.error('Storage save error', e);
+                    const saved = JSON.parse(localStorage.getItem('kahoot_custom_quizzes') || '[]');
+                    saved.push(newQuiz);
+                    localStorage.setItem('kahoot_custom_quizzes', JSON.stringify(saved));
+                } catch(e) {
+                    console.error("Local storage error:", e);
                 }
 
-                alert(`Викторина успешно создана!\nВаш PIN-код: ${pin}`);
                 this.renderPresetsList();
                 this.showScreen('welcomeScreen');
+                alert('Викторина успешно сохранена!');
             }
         }
 
-        // Initialize App on Load
+        // Initialize App Instance
         let app;
         window.onload = () => {
             app = new KahootApp();
